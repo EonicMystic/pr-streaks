@@ -157,10 +157,25 @@ def main():
     used = sum(1 for v in results.values() if v[0])
     print(f'competitions with registrations: {used}; people with a next comp: {len(nxt)}')
     if not nxt:
-        if os.path.exists(path):
-            os.remove(path)
+        for fn in ('next_comps.csv', 'comps.csv', 'registrations.csv'):
+            if os.path.exists(os.path.join(out_dir, fn)):
+                os.remove(os.path.join(out_dir, fn))
         print('nothing usable found; the site will hide next-comp lines')
         return
+    with open(os.path.join(out_dir, 'comps.csv'), 'w', newline='', encoding='utf-8') as f:
+        w = csv.writer(f)
+        w.writerow(['Comp ID', 'Competition', 'Start date', 'End date', 'City', 'Country code'])
+        for cid in sorted(comps, key=lambda c: (comps[c].get('start_date') or '', c)):
+            if results[cid][0]:
+                c = comps[cid]
+                w.writerow([cid, c.get('name', cid), c.get('start_date', ''), c.get('end_date', ''),
+                            c.get('city', ''), c.get('country_iso2', '')])
+    with open(os.path.join(out_dir, 'registrations.csv'), 'w', newline='', encoding='utf-8') as f:
+        w = csv.writer(f)
+        w.writerow(['WCA ID', 'Comp ID'])
+        for cid in comps:
+            for wid in sorted(results[cid][0] or ()):
+                w.writerow([wid, cid])
     with open(path, 'w', newline='', encoding='utf-8') as f:
         w = csv.writer(f)
         w.writerow(['WCA ID', 'Competition', 'Comp ID', 'Start date', 'End date', 'City', 'Country code'])
