@@ -294,6 +294,53 @@ write_rows('lost.csv',
             'Streak start', 'Streak end', 'Broke at (first comp without a PR)', 'Compared with'],
            lost, 'Nobody lost a streak in this period')
 
+
+# ---------- home-screen icons and manifest (so the site can be added to a phone's Home Screen) ----------
+def _png(size, path):
+    import zlib, struct
+    S = 3                                    # supersampling for smooth edges
+    bg, green, ring = (14, 17, 22), (86, 211, 100), (18, 53, 31)
+    n = 5
+    r = size * 0.075
+    gap = size * 0.165
+    cx0 = size / 2 - gap * (n - 1) / 2
+    cy = size / 2
+    rows = []
+    for y in range(size):
+        row = bytearray([0])
+        for x in range(size):
+            cov_g = cov_r = 0
+            for sy in range(S):
+                for sx in range(S):
+                    px, py = x + (sx + .5) / S, y + (sy + .5) / S
+                    for k in range(n):
+                        d = ((px - (cx0 + gap * k)) ** 2 + (py - cy) ** 2) ** .5
+                        if d <= r:
+                            cov_g += 1; break
+                        if k == n - 1 and d <= r * 1.75:
+                            cov_r += 1
+            t = S * S
+            g, rg = cov_g / t, cov_r / t
+            col = [bg[i] * (1 - g - rg) + green[i] * g + ring[i] * rg for i in range(3)]
+            row += bytes(int(round(c)) for c in col)
+        rows.append(bytes(row))
+    raw = b''.join(rows)
+    def chunk(tag, data):
+        c = struct.pack('>I', len(data)) + tag + data
+        return c + struct.pack('>I', zlib.crc32(tag + data) & 0xffffffff)
+    png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0)) \
+        + chunk(b'IDAT', zlib.compress(raw, 9)) + chunk(b'IEND', b'')
+    with open(path, 'wb') as f:
+        f.write(png)
+
+for _size, _name in ((180, 'apple-touch-icon.png'), (192, 'icon-192.png'), (512, 'icon-512.png')):
+    _png(_size, os.path.join(out_dir, _name))
+with open(os.path.join(out_dir, 'manifest.webmanifest'), 'w', encoding='utf-8') as f:
+    json.dump({'name': 'PR Streak Rankings', 'short_name': 'PR Streaks', 'start_url': '../', 'scope': '../',
+               'display': 'standalone', 'background_color': '#0e1116', 'theme_color': '#0e1116',
+               'icons': [{'src': 'icon-192.png', 'sizes': '192x192', 'type': 'image/png'},
+                         {'src': 'icon-512.png', 'sizes': '512x512', 'type': 'image/png'}]}, f, indent=1)
+
 with open(os.path.join(out_dir, 'updated.csv'), 'w') as f:
     f.write(f'Data from WCA export\n{stamp}\n')
 print('done', len(results), 'people;', len(gained), 'gained,', len(lost), 'lost; compared with', since or 'nothing yet', '; export', stamp)
