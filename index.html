@@ -45,11 +45,11 @@
   }
   .tab[aria-selected=true] { background: var(--tab-on); color: var(--tab-on-text); border-color: transparent; }
 
-  input[type=search], select {
+  input[type=number], input[type=search], select {
     width: 100%; padding: 12px 14px; font-size: 1rem; color: var(--text);
     background: var(--card); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px;
   }
-  input[type=search]:focus, select:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  input[type=number]:focus, input[type=search]:focus, select:focus { outline: 2px solid var(--accent); border-color: transparent; }
 
   .count { color: var(--muted); font-size: .9rem; margin: 2px 2px 10px; }
   .msg { color: var(--muted); text-align: center; padding: 28px 8px; }
@@ -138,6 +138,19 @@
   .exp .item { background: none; }
   .exp .lnk { display: block; padding: 10px 14px; font-size: .88rem; color: var(--accent); }
   select.small { width: auto; min-width: 150px; margin: 0 0 10px; padding: 9px 12px; font-size: .92rem; }
+  .sec h2 { font-size: 1.1rem; margin: 24px 0 4px; }
+  .sec p.d { color: var(--muted); font-size: .88rem; margin: 0 0 12px; }
+  .chip { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; }
+  .chip button { background: none; border: 0; color: var(--accent); font: inherit; cursor: pointer; }
+  .ladder { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-top: 12px; }
+  .ladder .r { display: grid; grid-template-columns: .55fr 1fr 1fr 1fr 1fr; gap: 6px; padding: 9px 12px; font-size: .85rem; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  .ladder .r:last-child { border-bottom: 0; }
+  .ladder .r.h { color: var(--muted); font-size: .72rem; }
+  .ladder .r.on { background: var(--good-bg); font-weight: 700; }
+  .res { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-top: 12px; }
+  .res b { font-size: 1.6rem; }
+  .res .s { color: var(--muted); font-size: .88rem; margin-top: 4px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .note { color: var(--muted); font-size: .8rem; margin-top: 22px; }
   .note a { color: var(--accent); }
 </style>
@@ -166,6 +179,7 @@ const TABS = [
   { id: "week",      label: "This week" },
   { id: "upcoming",  label: "Upcoming" },
   { id: "mine",      label: "My list" },
+  { id: "proj",      label: "Projections" },
   { id: "worldAll",  label: "World all-time" },
   { id: "worldAct",  label: "World active" },
   { id: "countryAll", label: "Country all-time" },
@@ -417,6 +431,122 @@ function renderUpcoming(v) {
   }).catch(() => { body.replaceChildren(el("div", "msg", "Upcoming competitions aren't available right now.")); });
 }
 
+/* ---------- projections ---------- */
+let projP = -1, projN = "", projCat = "worldAll", projR = "";
+function projRank(counts, v, own) {
+  let g = 0; for (let t = v + 1; t <= MAXS; t++) g += counts[t];
+  if (own > v) g -= 1;                                  // leave the person's own entry out
+  const eq = counts[v] - (own === v ? 1 : 0);
+  return { rank: g + 1, tied: eq > 0, eq };
+}
+const fmtP = r => (r.tied ? "T-" : "#") + r.rank.toLocaleString();
+
+function renderProj(v) {
+  const wrap = el("div", "sec");
+  wrap.append(el("p", "d", "See where a streak would rank, or what streak a rank takes. This uses today's data, and other people's streaks keep moving."));
+
+  // optional: start from a person
+  const pickBox = el("div");
+  const sel = el("select");
+  const first = el("option", null, "Choose a country…"); first.value = ""; sel.append(first);
+  for (const c of countryList) { const o = el("option", null, c); o.value = c; sel.append(o); }
+  sel.value = country;
+  const nIn = el("input"); nIn.type = "number"; nIn.min = "1"; nIn.max = String(MAXS); nIn.inputMode = "numeric"; nIn.placeholder = "Streak, e.g. 44"; nIn.value = projN;
+  const rIn = el("input"); rIn.type = "number"; rIn.min = "1"; rIn.inputMode = "numeric"; rIn.placeholder = "Rank, e.g. 10"; rIn.value = projR;
+  const cat = el("select");
+  for (const [k, l] of [["worldAll", "World all-time"], ["worldAct", "World active"], ["countryAll", "Country all-time"], ["countryAct", "Country active"]]) { const o = el("option", null, l); o.value = k; cat.append(o); }
+  cat.value = projCat;
+  const boxes = el("div"), ladder = el("div"), need = el("div");
+
+  const ownVals = () => {
+    const p = projP, inC = p >= 0 && cty[p] === country;
+    return { all: p >= 0 ? streak[p] : 0, act: p >= 0 ? cur[p] : 0, cAll: inC ? streak[p] : 0, cAct: inC ? cur[p] : 0 };
+  };
+  const ranksFor = n => {
+    const p = projP, o = ownVals(), ci = country ? cIndex.get(country) : -1;
+    const allVal = p >= 0 ? Math.max(streak[p], n) : n;      // all-time can't go down
+    return [
+      fmtP(projRank(cntAll, allVal, o.all)), fmtP(projRank(cntAct, n, o.act)),
+      ci >= 0 ? fmtP(projRank(ccAll[ci], allVal, o.cAll)) : "—", ci >= 0 ? fmtP(projRank(ccAct[ci], n, o.cAct)) : "—"
+    ];
+  };
+  const update = () => {
+    const n = parseInt(nIn.value, 10);
+    boxes.replaceChildren(); ladder.replaceChildren();
+    if (n >= 1 && n <= MAXS) {
+      const g = el("div", "grid");
+      const labels = ["World all-time", "World active", (country || "Country") + " all-time", (country || "Country") + " active"];
+      ranksFor(n).forEach((r, k) => { const b = el("div", "box" + (r === "—" ? " off" : "")); b.append(el("span", null, labels[k]), el("strong", null, r)); g.append(b); });
+      boxes.append(g);
+      const h = el("div", "r h"); for (const t of ["Streak", "World all-time", "World active", "Country all-time", "Country active"]) h.append(el("span", null, t));
+      ladder.append(h);
+      for (let k = n; k < Math.min(n + 8, MAXS + 1); k++) {
+        const r = el("div", "r" + (k === n ? " on" : "")); r.append(el("span", null, String(k)));
+        for (const t of ranksFor(k)) r.append(el("span", null, t));
+        ladder.append(r);
+      }
+      ladder.className = "ladder";
+    } else { ladder.className = ""; boxes.append(el("div", "msg", "Enter a streak between 1 and " + MAXS + ".")); }
+
+    // what does a rank take?
+    need.replaceChildren();
+    const rk = parseInt(rIn.value, 10), ci = country ? cIndex.get(country) : -1, o = ownVals();
+    const isC = projCat === "countryAll" || projCat === "countryAct";
+    if (isC && ci < 0) { need.append(el("div", "msg", "Choose a country above to use a country category.")); return; }
+    if (!(rk >= 1)) { need.append(el("div", "msg", "Enter the rank you want.")); return; }
+    const counts = projCat === "worldAll" ? cntAll : projCat === "worldAct" ? cntAct : projCat === "countryAll" ? ccAll[ci] : ccAct[ci];
+    const own = projCat === "worldAll" ? o.all : projCat === "worldAct" ? o.act : projCat === "countryAll" ? o.cAll : o.cAct;
+    let found = 0, res = null;
+    for (let t = 1; t <= MAXS; t++) { const r = projRank(counts, t, own); if (r.rank <= rk) { found = t; res = r; break; } }
+    const box = el("div", "res");
+    if (!found) { box.append(el("div", "s", "No streak reaches that rank.")); need.append(box); return; }
+    const label = el("div", "s", (projCat.startsWith("world") ? "World" : country) + (projCat.endsWith("All") ? " all-time" : " active") + " · rank " + rk.toLocaleString());
+    box.append(label, el("b", null, "A streak of " + found));
+    box.append(el("div", "s", "That puts you at " + fmtP(res) + (res.tied ? ", tied with " + res.eq + (res.eq === 1 ? " other person" : " other people") : "") + "."));
+    if (res.tied && res.rank < rk) { /* tie shares a better rank than asked for */ }
+    if (projP >= 0 && own > 0) {
+      const d = found - own;
+      box.append(el("div", "s", d > 0 ? "That's " + d + " more than " + names[projP] + "'s " + (projCat.endsWith("All") ? "longest" : "current") + " streak of " + own + "." : names[projP] + " is already there with " + own + "."));
+    }
+    need.append(box);
+  };
+
+  const chip = el("div");
+  const renderChip = () => {
+    chip.replaceChildren(); pickBox.replaceChildren();
+    if (projP >= 0) {
+      const c = el("div", "chip"); c.append(el("span", null, names[projP] + " · longest " + streak[projP] + " · current " + cur[projP]));
+      const x = el("button", null, "Clear"); x.type = "button"; x.addEventListener("click", () => { projP = -1; renderChip(); update(); });
+      c.append(x); chip.append(c); return;
+    }
+    const inp = el("input"); inp.type = "search"; inp.placeholder = "Start from a person (optional)…"; inp.autocomplete = "off"; inp.autocapitalize = "off"; inp.spellcheck = false;
+    const list = el("div"); pickBox.append(inp, list);
+    let t; inp.addEventListener("input", () => {
+      clearTimeout(t); t = setTimeout(() => {
+        list.replaceChildren(); const f = findMatches(inp.value); if (!f || !f.length) return;
+        const lb = el("div", "list");
+        for (const i of f.slice(0, 6)) lb.append(item("", i, () => {
+          projP = i; country = cty[i]; store("country", country); sel.value = country;
+          projN = String(Math.min(cur[i] + 1, MAXS)); nIn.value = projN; renderChip(); update();
+        }));
+        list.append(lb);
+      }, 150);
+    });
+  };
+
+  sel.addEventListener("change", () => { country = sel.value; store("country", country); update(); });
+  nIn.addEventListener("input", () => { projN = nIn.value; update(); });
+  rIn.addEventListener("input", () => { projR = rIn.value; update(); });
+  cat.addEventListener("change", () => { projCat = cat.value; update(); });
+
+  wrap.append(chip, pickBox, sel);
+  wrap.append(el("h2", null, "If I reach…"), el("p", "d", "Enter a streak to see the rank it would give you in each category. If you picked a person, their all-time rank never drops below their longest streak."), nIn, boxes, ladder);
+  wrap.append(el("h2", null, "What do I need for a rank?"), el("p", "d", "Pick a category and the rank you want to see the streak it takes."));
+  const two = el("div", "row2"); two.append(cat, rIn); wrap.append(two, need);
+  v.append(wrap);
+  renderChip(); update();
+}
+
 /* ---------- about / FAQ ---------- */
 function renderAbout(v) {
   backBtn(v);
@@ -428,6 +558,7 @@ function renderAbout(v) {
   add("What do Longest, Current and Active mean?", "<b>Longest</b> is a person's best-ever streak. <b>Current</b> is the PR run they're on right now, counted back from their latest competition, and it can be shorter than their longest. <b>Active</b> means they have a current streak: their most recent competition had a PR. A person's page shows both numbers when they differ.");
   add("How are ranks worked out?", "All-time rankings use each person\'s longest streak and Active rankings use their current streak. People with the same number share the best rank and show it as T- (for example T-196). Country ranks only compare people from the same country. Active ranks only compare people whose streak is still running. \"Longer than\" is the share of all competitors whose longest streak is shorter.");
   add("Why can't I find someone?", "People with no PR competitions, or who haven't competed yet, aren't listed. New results also take time to appear: the site rebuilds every night from the official WCA results export, which can lag a competition by a day or more.");
+  add("What is the Projections tab?", "It shows where a streak would rank, and what streak a rank takes, using today\'s numbers. Pick a person to start from their own streak. Other people keep competing, so real ranks will shift.");
   add("What is the This week tab?", "Current streaks of 30 or more that grew or ended since the comparison date shown on that tab. It fills in once the site has a week of history.");
   add("How does Upcoming and Next comp work?", "They use accepted registrations on the WCA site, refreshed nightly. Only people with a WCA ID appear, and pending or waitlisted registrations don't count. \"Next comp\" is the earliest upcoming competition someone is accepted for. Upcoming only counts people with an active current streak, since only those streaks are still on the line.");
   add("Where is my My list saved?", "In this browser only. It won't follow you to another device or to the Home Screen version of the site. Use Copy and Import at the bottom of My list to move or back it up.");
@@ -825,7 +956,7 @@ function render() {
     window.scrollTo(0, 0); return;
   }
   $("tabs").style.display = ""; renderTabs();
-  if (tab === "lookup") renderLookup(v); else if (tab === "week") renderWeek(v); else if (tab === "mine") renderMine(v); else if (tab === "upcoming") renderUpcoming(v); else renderBoard(v);
+  if (tab === "lookup") renderLookup(v); else if (tab === "week") renderWeek(v); else if (tab === "mine") renderMine(v); else if (tab === "upcoming") renderUpcoming(v); else if (tab === "proj") renderProj(v); else renderBoard(v);
 }
 
 window.addEventListener("hashchange", render);
