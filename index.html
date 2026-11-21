@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PR Streak Lookup</title>
+<title>PR Streak Rankings</title>
 <style>
   :root {
     --bg: #f6f7f9; --card: #ffffff; --text: #16191d; --muted: #5d6671; --line: #e1e4e8;
-    --accent: #1f6feb; --good: #1a7f37; --good-bg: #dcf5e3; --off-bg: #eceff2;
+    --accent: #1f6feb; --good: #1a7f37; --good-bg: #dcf5e3; --off-bg: #eceff2; --tab-on: #16191d; --tab-on-text: #ffffff;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #0e1116; --card: #171b22; --text: #e6e9ee; --muted: #9aa4b0; --line: #2a303a;
-      --accent: #58a6ff; --good: #56d364; --good-bg: #12351f; --off-bg: #232a33;
+      --accent: #58a6ff; --good: #56d364; --good-bg: #12351f; --off-bg: #232a33; --tab-on: #e6e9ee; --tab-on-text: #0e1116;
     }
   }
   * { box-sizing: border-box; }
@@ -20,213 +20,313 @@
     margin: 0; background: var(--bg); color: var(--text);
     font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
-  .wrap { max-width: 760px; margin: 0 auto; padding: 20px 16px 48px; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 20px 16px 56px; }
   h1 { font-size: 1.5rem; margin: 8px 0 4px; }
-  .sub { color: var(--muted); margin: 0 0 16px; font-size: .95rem; }
-  .controls { display: grid; gap: 10px; margin-bottom: 14px; }
+  .sub { color: var(--muted); margin: 0 0 14px; font-size: .95rem; }
+
+  .tabs { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 12px; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    flex: 0 0 auto; padding: 9px 14px; border-radius: 999px; font-size: .92rem; font-weight: 600;
+    border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; white-space: nowrap;
+  }
+  .tab[aria-selected=true] { background: var(--tab-on); color: var(--tab-on-text); border-color: transparent; }
+
   input[type=search], select {
     width: 100%; padding: 12px 14px; font-size: 1rem; color: var(--text);
-    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px;
   }
   input[type=search]:focus, select:focus { outline: 2px solid var(--accent); border-color: transparent; }
-  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .row select { flex: 1 1 180px; width: auto; }
-  label.chk { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .95rem; }
-  label.chk input { width: 18px; height: 18px; }
-  .count { color: var(--muted); font-size: .9rem; margin: 6px 2px 10px; }
-  .card {
-    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
-    padding: 14px 16px; margin-bottom: 10px;
-  }
-  .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-  .name { font-weight: 650; font-size: 1.05rem; }
-  .name a { color: inherit; text-decoration: none; }
-  .name a:hover { color: var(--accent); text-decoration: underline; }
-  .meta { color: var(--muted); font-size: .88rem; margin-top: 2px; }
-  .streak { text-align: right; }
-  .streak b { font-size: 1.9rem; line-height: 1; display: block; }
-  .badge {
-    display: inline-block; margin-top: 4px; padding: 2px 9px; border-radius: 999px;
-    font-size: .75rem; font-weight: 600; background: var(--off-bg); color: var(--muted);
-  }
-  .badge.on { background: var(--good-bg); color: var(--good); }
-  .ranks { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 12px; }
-  .rk { background: var(--bg); border-radius: 8px; padding: 8px 10px; }
-  .rk span { display: block; color: var(--muted); font-size: .75rem; }
-  .rk strong { font-size: 1.05rem; }
-  .foot { color: var(--muted); font-size: .85rem; margin-top: 10px; }
+
+  .count { color: var(--muted); font-size: .9rem; margin: 2px 2px 10px; }
   .msg { color: var(--muted); text-align: center; padding: 28px 8px; }
+
+  .list { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .item {
+    display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+    padding: 12px 14px; border: 0; border-bottom: 1px solid var(--line); background: none; color: inherit;
+    font: inherit; cursor: pointer;
+  }
+  .item:last-child { border-bottom: 0; }
+  .item:hover { background: var(--bg); }
+  .rk { flex: 0 0 52px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .who { flex: 1 1 auto; min-width: 0; }
+  .who .n { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .who .c { color: var(--muted); font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .st { flex: 0 0 auto; text-align: right; font-weight: 750; font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--good); margin-left: 6px; vertical-align: middle; }
+  .more {
+    display: block; width: 100%; margin-top: 12px; padding: 12px; border-radius: 10px; font-size: 1rem; font-weight: 600;
+    border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer;
+  }
+
+  .back { background: none; border: 0; color: var(--accent); font-size: 1rem; padding: 4px 0 12px; cursor: pointer; }
+  .detail { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 16px; }
+  .detail h2 { margin: 0; font-size: 1.35rem; }
+  .detail h2 a { color: inherit; text-decoration: none; }
+  .detail h2 a:hover { color: var(--accent); text-decoration: underline; }
+  .meta { color: var(--muted); font-size: .9rem; margin-top: 2px; }
+  .big { display: flex; align-items: baseline; gap: 12px; margin: 16px 0 4px; flex-wrap: wrap; }
+  .big b { font-size: 3rem; line-height: 1; }
+  .big span.l { color: var(--muted); }
+  .badge { display: inline-block; padding: 3px 11px; border-radius: 999px; font-size: .8rem; font-weight: 650; background: var(--off-bg); color: var(--muted); }
+  .badge.on { background: var(--good-bg); color: var(--good); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 16px; }
+  .box { background: var(--bg); border-radius: 10px; padding: 10px 12px; }
+  .box span { display: block; color: var(--muted); font-size: .78rem; }
+  .box strong { font-size: 1.25rem; }
+  .box small { display: block; color: var(--muted); font-size: .75rem; margin-top: 1px; }
+  .box.off strong { opacity: .4; }
+
   .note { color: var(--muted); font-size: .8rem; margin-top: 22px; }
+  .note a { color: var(--accent); }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>PR Streak Lookup</h1>
-  <p class="sub">Longest streak of consecutive competitions with a PR. Search by name, WCA ID or country.</p>
+  <h1>PR Streak Rankings</h1>
+  <p class="sub">Longest streak of consecutive competitions with a personal record, for every WCA competitor.</p>
 
-  <div class="controls">
-    <input id="q" type="search" placeholder="Search name or WCA ID…" autocomplete="off" autocapitalize="off" spellcheck="false">
-    <div class="row">
-      <select id="country"><option value="">All countries</option></select>
-      <label class="chk"><input id="active" type="checkbox"> Active streaks only</label>
-    </div>
-  </div>
-
-  <div id="count" class="count"></div>
-  <div id="results"></div>
+  <div class="tabs" role="tablist" id="tabs"></div>
+  <div id="view"></div>
 
   <p class="note" id="updated"></p>
-  <p class="note">A streak is the most consecutive competitions a person attended where they set at least one PR (a tie counts).
-  "Active" means the streak is still running at the person's most recent competition. Only people with a streak of 5 or more are listed.
-  Ranks marked T- are tied. Data comes from the official WCA results export.</p>
+  <p class="note">
+    A streak is the most consecutive competitions a person attended where they set at least one PR (matching a PR counts).
+    <b>Active</b> means the streak is still running at their most recent competition. Ranks marked T- are tied.
+    This is an unofficial fan-made tool. Data comes from the
+    <a href="https://www.worldcubeassociation.org/export/results" target="_blank" rel="noopener">official WCA results export</a>.
+  </p>
 </div>
 
 <script>
-// Where the data lives. The raw GitHub address is always the freshest; the relative one is a backup.
-const DATA_URLS = [
-  "https://raw.githubusercontent.com/EonicMystic/pr-streaks/main/data/search.csv",
-  "data/search.csv"
+const PAGE = 40;
+const TABS = [
+  { id: "lookup",    label: "Lookup" },
+  { id: "worldAll",  label: "World all-time" },
+  { id: "worldAct",  label: "World active" },
+  { id: "countryAll", label: "Country all-time" },
+  { id: "countryAct", label: "Country active" }
 ];
-const UPDATED_URLS = [
-  "https://raw.githubusercontent.com/EonicMystic/pr-streaks/main/data/updated.csv",
-  "data/updated.csv"
-];
-const MAX_SHOWN = 40;
 
 const $ = id => document.getElementById(id);
-let rows = [];
-
-function parseCSV(text) {
-  const out = []; let row = [], field = "", inQ = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQ) {
-      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
-      else field += c;
-    } else if (c === '"') inQ = true;
-    else if (c === ",") { row.push(field); field = ""; }
-    else if (c === "\n") { row.push(field); out.push(row); row = []; field = ""; }
-    else if (c !== "\r") field += c;
-  }
-  if (field !== "" || row.length) { row.push(field); out.push(row); }
-  return out;
-}
-
-async function fetchFirst(urls) {
-  let lastErr;
-  for (const u of urls) {
-    try {
-      const r = await fetch(u, { cache: "no-cache" });
-      if (r.ok) return await r.text();
-      lastErr = new Error(r.status);
-    } catch (e) { lastErr = e; }
-  }
-  throw lastErr;
-}
-
 const fold = s => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-
 function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   if (text !== undefined) e.textContent = text;
   return e;
 }
+function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) {} return null; }
 
-function rank(label, value) {
-  const d = el("div", "rk");
-  d.append(el("span", null, label), el("strong", null, value === "——" ? "—" : (value.startsWith("T-") ? value : "#" + value)));
-  if (value === "——") d.style.opacity = ".45";
-  return d;
+/* ---------------- data ---------------- */
+let N = 0, names = [], ids = [], cty = [], hay = [];
+let streak, active, countryList = [], cIndex = new Map(), ctyIdx;
+let buckets = [];                       // buckets[s] = person indexes with streak s
+let cntAll = [], cntAct = [], ccAll = [], ccAct = []; // streak -> count (world), per-country arrays
+let totalAll = 0, totalAct = 0;
+const MAXS = 200;
+
+function parseLine(line) {
+  if (line.indexOf('"') < 0) return line.split(",");
+  const out = []; let f = "", q = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (q) { if (c === '"') { if (line[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true;
+    else if (c === ",") { out.push(f); f = ""; }
+    else f += c;
+  }
+  out.push(f);
+  return out;
 }
 
-function card(p) {
-  const c = el("div", "card");
-  const top = el("div", "top");
-  const left = el("div");
-  const nm = el("div", "name");
-  const a = el("a", null, p.name);
-  a.href = "https://www.worldcubeassociation.org/persons/" + encodeURIComponent(p.id);
-  a.target = "_blank"; a.rel = "noopener";
-  nm.append(a);
-  left.append(nm, el("div", "meta", p.id + " · " + p.country));
-  const right = el("div", "streak");
-  const b = el("b", null, p.streak);
-  right.append(b, el("span", "badge" + (p.active ? " on" : ""), p.active ? "Active" : "Ended"));
-  top.append(left, right);
-  c.append(top);
-
-  const grid = el("div", "ranks");
-  grid.append(rank("World all-time", p.wAll));
-  if (p.active) grid.append(rank("World active", p.wAct));
-  if (p.country === "USA") {
-    grid.append(rank("USA all-time", p.uAll));
-    if (p.active) grid.append(rank("USA active", p.uAct));
+async function load() {
+  const r = await fetch("data/people.csv", { cache: "no-cache" });
+  if (!r.ok) throw new Error(r.status);
+  const lines = (await r.text()).split("\n");
+  lines.shift();
+  const rows = [];
+  for (const ln of lines) { if (!ln) continue; const p = parseLine(ln.replace(/\r$/, "")); if (p.length >= 5) rows.push(p); }
+  N = rows.length;
+  streak = new Uint8Array(N); active = new Uint8Array(N); ctyIdx = new Uint16Array(N);
+  buckets = Array.from({ length: MAXS + 1 }, () => []);
+  cntAll = new Int32Array(MAXS + 2); cntAct = new Int32Array(MAXS + 2);
+  for (let i = 0; i < N; i++) {
+    const p = rows[i];
+    names.push(p[0]); ids.push(p[1]); cty.push(p[2]);
+    let ci = cIndex.get(p[2]);
+    if (ci === undefined) { ci = countryList.length; cIndex.set(p[2], ci); countryList.push(p[2]); ccAll.push(new Int32Array(MAXS + 2)); ccAct.push(new Int32Array(MAXS + 2)); }
+    ctyIdx[i] = ci;
+    const s = Math.min(+p[3] || 0, MAXS), a = p[4] === "1" ? 1 : 0;
+    streak[i] = s; active[i] = a;
+    buckets[s].push(i);
+    cntAll[s]++; ccAll[ci][s]++; totalAll++;
+    if (a) { cntAct[s]++; ccAct[ci][s]++; totalAct++; }
+    hay.push(fold(p[0] + " " + p[1]));
   }
-  c.append(grid);
+  countryList.sort((a, b) => a.localeCompare(b));
+}
 
-  const per = (p.comps / 12).toFixed(1);
-  const span = p.active ? p.start + " → still going" : p.start + " → " + p.end;
-  c.append(el("div", "foot", span + " · " + p.comps + " comps in the last 12 months (" + per + "/month)"));
-  return c;
+/* rank of a streak value inside one board: returns {rank, tied, total} */
+function rankIn(counts, s) {
+  let greater = 0, total = 0;
+  for (let t = 0; t <= MAXS; t++) { total += counts[t]; if (t > s) greater += counts[t]; }
+  return { rank: greater + 1, tied: counts[s] > 1, total };
+}
+const fmtRank = r => (r.tied ? "T-" : "#") + r.rank.toLocaleString();
+
+/* ---------------- boards ---------------- */
+function boardRows(kind, country, limit) {
+  const needActive = kind === "worldAct" || kind === "countryAct";
+  const byCountry = kind === "countryAll" || kind === "countryAct";
+  const ci = byCountry ? cIndex.get(country) : -1;
+  const rows = []; let before = 0, more = false;
+  for (let s = MAXS; s >= 1 && !more; s--) {
+    const b = buckets[s]; if (!b.length) continue;
+    let m = b;
+    if (needActive || byCountry) m = b.filter(i => (!needActive || active[i]) && (!byCountry || ctyIdx[i] === ci));
+    if (!m.length) continue;
+    m = m.slice().sort((x, y) => names[x].localeCompare(names[y]));
+    const tied = m.length > 1;
+    for (const i of m) {
+      if (rows.length >= limit) { more = true; break; }
+      rows.push({ i, rank: (tied ? "T-" : "") + (before + 1) });
+    }
+    before += m.length;
+  }
+  return { rows, more };
+}
+
+/* ---------------- views ---------------- */
+let tab = "lookup", shown = PAGE, query = "", country = store("country") || "";
+
+function item(rank, i) {
+  const b = el("button", "item");
+  b.type = "button";
+  const r = el("div", "rk", rank);
+  const who = el("div", "who");
+  who.append(el("div", "n", names[i]), el("div", "c", cty[i]));
+  const st = el("div", "st", String(streak[i]));
+  if (active[i]) st.append(el("span", "dot"));
+  b.append(r, who, st);
+  b.addEventListener("click", () => openPerson(ids[i]));
+  return b;
+}
+
+function renderTabs() {
+  const box = $("tabs"); box.replaceChildren();
+  for (const t of TABS) {
+    const b = el("button", "tab", t.label);
+    b.type = "button"; b.setAttribute("role", "tab"); b.setAttribute("aria-selected", t.id === tab ? "true" : "false");
+    b.addEventListener("click", () => { tab = t.id; shown = PAGE; history.replaceState(null, "", location.pathname); render(); });
+    box.append(b);
+  }
+}
+
+function renderLookup(v) {
+  const inp = el("input"); inp.type = "search"; inp.placeholder = "Search a name or WCA ID…";
+  inp.autocomplete = "off"; inp.autocapitalize = "off"; inp.spellcheck = false; inp.value = query;
+  const count = el("div", "count"); const list = el("div");
+  v.append(inp, count, list);
+  const run = () => {
+    const q = fold(query.trim()); list.replaceChildren();
+    if (q.length < 2) { count.textContent = ""; list.append(el("div", "msg", "Type at least 2 letters of a name or a WCA ID.")); return; }
+    const terms = q.split(/\s+/), found = [];
+    for (let i = 0; i < N; i++) { let ok = true; for (const t of terms) if (!hay[i].includes(t)) { ok = false; break; } if (ok) found.push(i); }
+    found.sort((a, b) => streak[b] - streak[a] || names[a].localeCompare(names[b]));
+    if (!found.length) { count.textContent = ""; list.append(el("div", "msg", "No one found. Check the spelling or try the WCA ID.")); return; }
+    count.textContent = found.length > 40 ? "Showing 40 of " + found.length.toLocaleString() + " matches. Keep typing to narrow it." : found.length + (found.length === 1 ? " match" : " matches");
+    const box = el("div", "list");
+    for (const i of found.slice(0, 40)) box.append(item("", i));
+    list.append(box);
+  };
+  let t; inp.addEventListener("input", () => { query = inp.value; clearTimeout(t); t = setTimeout(run, 150); });
+  run();
+}
+
+function renderBoard(v) {
+  const byCountry = tab === "countryAll" || tab === "countryAct";
+  if (byCountry) {
+    const sel = el("select"); const first = el("option", null, "Choose a country…"); first.value = ""; sel.append(first);
+    for (const c of countryList) { const o = el("option", null, c); o.value = c; sel.append(o); }
+    sel.value = country;
+    sel.addEventListener("change", () => { country = sel.value; store("country", country); shown = PAGE; render(); });
+    v.append(sel);
+    if (!country) { v.append(el("div", "msg", "Pick a country to see its ranking.")); return; }
+  }
+  const { rows, more } = boardRows(tab, country, shown);
+  if (!rows.length) { v.append(el("div", "msg", "No one to show.")); return; }
+  const box = el("div", "list");
+  for (const r of rows) box.append(item(r.rank, r.i));
+  v.append(box);
+  if (more) {
+    const b = el("button", "more", "Show more"); b.type = "button";
+    b.addEventListener("click", () => { shown += PAGE; render(); });
+    v.append(b);
+  }
+}
+
+function openPerson(id) { location.hash = "p=" + encodeURIComponent(id); }
+
+function renderPerson(v, i) {
+  const back = el("button", "back", "← Back"); back.type = "button";
+  back.addEventListener("click", () => { if (history.length > 1) history.back(); else { history.replaceState(null, "", location.pathname); render(); } });
+  v.append(back);
+
+  const d = el("div", "detail");
+  const h = el("h2"); const a = el("a", null, names[i]);
+  a.href = "https://www.worldcubeassociation.org/persons/" + encodeURIComponent(ids[i]); a.target = "_blank"; a.rel = "noopener";
+  h.append(a);
+  d.append(h, el("div", "meta", ids[i] + " · " + cty[i]));
+
+  const big = el("div", "big");
+  big.append(el("b", null, String(streak[i])), el("span", "l", "competitions in a row with a PR"));
+  d.append(big);
+  d.append(el("span", "badge" + (active[i] ? " on" : ""), active[i] ? "Active — streak still running" : "Ended"));
+
+  const s = streak[i], ci = ctyIdx[i];
+  const grid = el("div", "grid");
+  const box = (label, counts, on, ofWhat) => {
+    const b = el("div", "box" + (on ? "" : " off"));
+    b.append(el("span", null, label));
+    if (on) { const r = rankIn(counts, s); b.append(el("strong", null, fmtRank(r)), el("small", null, "of " + r.total.toLocaleString() + " " + ofWhat)); }
+    else { b.append(el("strong", null, "—"), el("small", null, "Not active")); }
+    return b;
+  };
+  grid.append(
+    box("World all-time", cntAll, true, "competitors"),
+    box("World active", cntAct, !!active[i], "active streaks"),
+    box(cty[i] + " all-time", ccAll[ci], true, "competitors"),
+    box(cty[i] + " active", ccAct[ci], !!active[i], "active streaks")
+  );
+  d.append(grid);
+  v.append(d);
 }
 
 function render() {
-  const q = fold($("q").value.trim());
-  const country = $("country").value;
-  const onlyActive = $("active").checked;
-  const terms = q ? q.split(/\s+/) : [];
-  const found = [];
-  for (const p of rows) {
-    if (onlyActive && !p.active) continue;
-    if (country && p.country !== country) continue;
-    let ok = true;
-    for (const t of terms) if (!p.hay.includes(t)) { ok = false; break; }
-    if (ok) found.push(p);
+  const v = $("view"); v.replaceChildren();
+  const m = /^#p=(.+)$/.exec(location.hash);
+  if (m) {
+    const id = decodeURIComponent(m[1]); const i = ids.indexOf(id);
+    $("tabs").style.display = "none";
+    if (i >= 0) { renderPerson(v, i); window.scrollTo(0, 0); return; }
   }
-  const box = $("results");
-  box.replaceChildren();
-  if (!found.length) {
-    box.append(el("div", "msg", "No match. Only people with a streak of 5 or more are listed."));
-    $("count").textContent = "";
-    return;
-  }
-  const shown = found.slice(0, MAX_SHOWN);
-  for (const p of shown) box.append(card(p));
-  $("count").textContent = found.length > MAX_SHOWN
-    ? "Showing the top " + MAX_SHOWN + " of " + found.length.toLocaleString() + " people. Narrow your search to see others."
-    : found.length + (found.length === 1 ? " person" : " people");
+  $("tabs").style.display = ""; renderTabs();
+  if (tab === "lookup") renderLookup(v); else renderBoard(v);
 }
 
-let timer;
-function later() { clearTimeout(timer); timer = setTimeout(render, 120); }
+window.addEventListener("hashchange", render);
 
-async function init() {
-  $("results").append(el("div", "msg", "Loading…"));
+(async function init() {
+  $("view").append(el("div", "msg", "Loading every competitor… this takes a few seconds."));
+  try { await load(); } catch (e) { $("view").replaceChildren(el("div", "msg", "Couldn't load the data. Please try again in a moment.")); return; }
+  render();
   try {
-    const text = await fetchFirst(DATA_URLS);
-    const t = parseCSV(text); t.shift();
-    rows = t.filter(r => r.length >= 10).map(r => ({
-      name: r[0], id: r[1], country: r[2], streak: r[3],
-      wAll: r[4], uAll: r[5], active: r[6] === "Yes", wAct: r[7], uAct: r[8],
-      comps: +r[9] || 0, start: r[10] || "", end: r[11] || "",
-      hay: fold(r[0] + " " + r[1] + " " + r[2])
-    }));
-    const countries = [...new Set(rows.map(r => r.country))].sort((a, b) => a.localeCompare(b));
-    for (const c of countries) { const o = el("option", null, c); o.value = c; $("country").append(o); }
-    $("q").addEventListener("input", later);
-    $("country").addEventListener("change", render);
-    $("active").addEventListener("change", render);
-    render();
-  } catch (e) {
-    $("results").replaceChildren(el("div", "msg", "Couldn't load the data. Please try again in a moment."));
-  }
-  try {
-    const u = (await fetchFirst(UPDATED_URLS)).split("\n");
-    if (u[1]) $("updated").textContent = "Data from the WCA export of " + u[1].trim().replace(" UTC", "") + " UTC.";
+    const t = (await (await fetch("data/updated.csv", { cache: "no-cache" })).text()).split("\n")[1];
+    if (t) $("updated").textContent = "Data from the WCA export of " + t.trim().replace(" UTC", "") + " UTC.";
   } catch (e) {}
-}
-init();
+})();
 </script>
 </body>
 </html>
