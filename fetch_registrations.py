@@ -66,27 +66,37 @@ def registrants(cid):
             if w and status in (None, 'accepted'):
                 out.add(w)
         return out, 'wcif'
-    # 2) registrations JSON
-    st, body = get(f'/api/v0/competitions/{cid}/registrations')
-    d = jload(body) if st == 200 else None
-    if isinstance(d, list):
-        out = set()
-        for it in d:
-            if not isinstance(it, dict):
-                continue
-            w = it.get('wca_id') or (it.get('user') or {}).get('wca_id')
-            status = it.get('status') or (it.get('competing') or {}).get('registration_status')
-            if w and status in (None, 'accepted'):
-                out.add(w)
-        if out:
-            return out, 'json'
-    # 3) public registrations page
+    # 2) public registrations page
     st, body = get(f'/competitions/{cid}/registrations')
     if st == 200:
         out = set(ID_RE.findall(body))
         if out:
             return out, 'html'
     return None, 'none'
+
+
+def diagnose(cid, wid):
+    """Print what the WCA returns for one competition and one person (for debugging)."""
+    print(f'--- diagnose {cid} / {wid} ---')
+    st, body = get(f'/api/v0/competitions/{cid}/wcif/public')
+    print('wcif/public http status:', st, 'bytes:', len(body))
+    d = jload(body) if st == 200 else None
+    if isinstance(d, dict):
+        persons = d.get('persons') or []
+        counts = {}
+        for p in persons:
+            reg = p.get('registration')
+            k = reg.get('status') if isinstance(reg, dict) else 'no-registration'
+            counts[k] = counts.get(k, 0) + 1
+        print('wcif persons:', len(persons), 'by status:', counts)
+        for p in persons:
+            if p.get('wcaId') == wid:
+                print('person record:', json.dumps({k: p.get(k) for k in ('name', 'wcaId', 'registration')})[:400])
+                break
+        else:
+            print('person NOT in wcif persons')
+    st, body = get(f'/competitions/{cid}/registrations')
+    print('registrations page http status:', st, 'bytes:', len(body), 'ids found:', len(set(ID_RE.findall(body))), 'person in page:', wid in body)
 
 
 def main():
@@ -97,11 +107,11 @@ def main():
     print(f'upcoming competitions found: {len(comps)}')
 
     def work(cid):
-        time.sleep(0.1)
+        time.sleep(0.05)
         return cid, registrants(cid)
 
     results = {}
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    with ThreadPoolExecutor(max_workers=16) as ex:
         for cid, (ids, src) in ex.map(work, list(comps)):
             results[cid] = (ids, src)
 
@@ -120,6 +130,10 @@ def main():
             if w not in nxt:
                 nxt[w] = [w, c.get('name', cid), cid, c.get('start_date', ''), c.get('end_date', ''),
                           c.get('city', ''), c.get('country_iso2', '')]
+    try:
+        diagnose(os.environ.get('DIAG_COMP', 'AlgsinAnkeny2026'), os.environ.get('DIAG_ID', '2017BYLB01'))
+    except Exception as e:
+        print('diagnose skipped:', e)
     used = sum(1 for v in results.values() if v[0])
     print(f'competitions with registrations: {used}; people with a next comp: {len(nxt)}')
     if not nxt:
