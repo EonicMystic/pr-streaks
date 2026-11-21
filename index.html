@@ -153,7 +153,7 @@
   <p class="note" id="updated"></p>
   <p class="note">
     Next competitions come from accepted registrations as of the last update. A streak is the most consecutive competitions a person attended where they set at least one PR (matching a PR counts).
-    <b>Active</b> means the streak is still running at their most recent competition. Ranks marked T- are tied.
+    <b>Active</b> means they're on a PR streak right now. All-time ranks use the longest streak and active ranks use the current one. Ranks marked T- are tied.
     This is an unofficial fan-made tool. <a href="#about">How this works</a> · <a href="https://github.com/EonicMystic/pr-streaks/issues/new" target="_blank" rel="noopener">Report a problem</a>. Data comes from the
     <a href="https://www.worldcubeassociation.org/export/results" target="_blank" rel="noopener">official WCA results export</a>.
   </p>
@@ -183,11 +183,11 @@ function el(tag, cls, text) {
 function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) {} return null; }
 
 /* ---------------- data ---------------- */
-let N = 0, names = [], ids = [], cty = [], hay = [];
-let streak, active, countryList = [], cIndex = new Map(), ctyIdx;
+let N = 0, names = [], ids = [], cty = [], hay = null;
+let streak, active, cur, countryList = [], cIndex = new Map(), ctyIdx;
 let buckets = [];                       // buckets[s] = person indexes with streak s
 let cntAll = [], cntAct = [], ccAll = [], ccAct = []; // streak -> count (world), per-country arrays
-let totalAll = 0, totalAct = 0;
+let totalAll = 0, totalAct = 0, runBuckets = [];
 const MAXS = 200;
 
 function parseLine(line) {
@@ -207,27 +207,42 @@ function parseLine(line) {
 async function load() {
   const r = await fetch("data/people.csv", { cache: "no-cache" });
   if (!r.ok) throw new Error(r.status);
-  const lines = (await r.text()).split("\n");
-  lines.shift();
-  const rows = [];
-  for (const ln of lines) { if (!ln) continue; const p = parseLine(ln.replace(/\r$/, "")); if (p.length >= 5) rows.push(p); }
-  N = rows.length;
-  streak = new Uint8Array(N); active = new Uint8Array(N); ctyIdx = new Uint16Array(N);
+  const text = await r.text();
+  const cap = Math.ceil(text.length / 38) + 1000;          // generous upper bound on the row count
+  streak = new Uint8Array(cap); active = new Uint8Array(cap); ctyIdx = new Uint16Array(cap); cur = new Uint8Array(cap);
   buckets = Array.from({ length: MAXS + 1 }, () => []);
+  runBuckets = Array.from({ length: MAXS + 1 }, () => []);
   cntAll = new Int32Array(MAXS + 2); cntAct = new Int32Array(MAXS + 2);
-  for (let i = 0; i < N; i++) {
-    const p = rows[i];
-    names.push(p[0]); ids.push(p[1]); cty.push(p[2]);
-    let ci = cIndex.get(p[2]);
-    if (ci === undefined) { ci = countryList.length; cIndex.set(p[2], ci); countryList.push(p[2]); ccAll.push(new Int32Array(MAXS + 2)); ccAct.push(new Int32Array(MAXS + 2)); }
+  let pos = text.indexOf("\n") + 1, i = 0;
+  const end = text.length;
+  while (pos < end) {
+    let nl = text.indexOf("\n", pos); if (nl < 0) nl = end;
+    let line = text.slice(pos, nl); pos = nl + 1;
+    if (line.charCodeAt(line.length - 1) === 13) line = line.slice(0, -1);
+    if (!line) continue;
+    let f0, f1, f2, f3, f4, f5;
+    if (line.indexOf('"') < 0) {
+      const c1 = line.indexOf(","), c2 = line.indexOf(",", c1 + 1), c3 = line.indexOf(",", c2 + 1), c4 = line.indexOf(",", c3 + 1), c5 = line.indexOf(",", c4 + 1);
+      if (c4 < 0) continue;
+      f0 = line.slice(0, c1); f1 = line.slice(c1 + 1, c2); f2 = line.slice(c2 + 1, c3); f3 = line.slice(c3 + 1, c4);
+      f4 = c5 < 0 ? line.slice(c4 + 1) : line.slice(c4 + 1, c5); f5 = c5 < 0 ? "" : line.slice(c5 + 1);
+    } else {
+      const p = parseLine(line); if (p.length < 5) continue;
+      f0 = p[0]; f1 = p[1]; f2 = p[2]; f3 = p[3]; f4 = p[4]; f5 = p[5] || "";
+    }
+    names.push(f0); ids.push(f1); cty.push(f2);
+    let ci = cIndex.get(f2);
+    if (ci === undefined) { ci = countryList.length; cIndex.set(f2, ci); countryList.push(f2); ccAll.push(new Int32Array(MAXS + 2)); ccAct.push(new Int32Array(MAXS + 2)); }
     ctyIdx[i] = ci;
-    const s = Math.min(+p[3] || 0, MAXS), a = p[4] === "1" ? 1 : 0;
-    streak[i] = s; active[i] = a;
+    const s = Math.min(+f3 || 0, MAXS), a = f4 === "1" ? 1 : 0;
+    const c = f5 === "" ? (a ? s : 0) : Math.min(+f5 || 0, MAXS);     // current run; older data files had no such column
+    streak[i] = s; active[i] = a; cur[i] = c;
     buckets[s].push(i);
     cntAll[s]++; ccAll[ci][s]++; totalAll++;
-    if (a) { cntAct[s]++; ccAct[ci][s]++; totalAct++; }
-    hay.push(fold(p[0] + " " + p[1]));
+    if (c > 0) { cntAct[c]++; ccAct[ci][c]++; totalAct++; runBuckets[c].push(i); }
+    i++;
   }
+  N = i;
   countryList.sort((a, b) => a.localeCompare(b));
 }
 
@@ -246,15 +261,15 @@ function boardRows(kind, country, limit) {
   const ci = byCountry ? cIndex.get(country) : -1;
   const rows = []; let before = 0, more = false;
   for (let s = MAXS; s >= 1 && !more; s--) {
-    const b = buckets[s]; if (!b.length) continue;
+    const b = (needActive ? runBuckets : buckets)[s]; if (!b.length) continue;
     let m = b;
-    if (needActive || byCountry) m = b.filter(i => (!needActive || active[i]) && (!byCountry || ctyIdx[i] === ci));
+    if (byCountry) m = b.filter(i => ctyIdx[i] === ci);
     if (!m.length) continue;
     m = m.slice().sort((x, y) => names[x].localeCompare(names[y]));
     const tied = m.length > 1;
     for (const i of m) {
       if (rows.length >= limit) { more = true; break; }
-      rows.push({ i, rank: (tied ? "T-" : "") + (before + 1) });
+      rows.push({ i, rank: (tied ? "T-" : "") + (before + 1), val: s });
     }
     before += m.length;
   }
@@ -278,10 +293,11 @@ function rowEl(rank, name, sub, right, dot, onclick) {
   b.addEventListener("click", onclick);
   return b;
 }
-function item(rank, i, onclick) { return rowEl(rank, names[i], cty[i], String(streak[i]), active[i], onclick || (() => openPerson(ids[i]))); }
+function item(rank, i, onclick, val) { return rowEl(rank, names[i], cty[i], String(val === undefined ? streak[i] : val), val === undefined ? active[i] : true, onclick || (() => openPerson(ids[i]))); }
 
 function findMatches(q) {
   q = fold(q.trim()); if (q.length < 2) return null;
+  if (!hay) { hay = new Array(N); for (let i = 0; i < N; i++) hay[i] = fold(names[i] + " " + ids[i]); }
   const terms = q.split(/\s+/), found = [];
   for (let i = 0; i < N; i++) { let ok = true; for (const t of terms) if (!hay[i].includes(t)) { ok = false; break; } if (ok) found.push(i); }
   found.sort((a, b) => streak[b] - streak[a] || names[a].localeCompare(names[b]));
@@ -351,9 +367,9 @@ async function loadUpcoming() {
     const c = map.get(p[1]); if (!c) continue;
     c.total++;
     const i = idx(p[0]);
-    if (i >= 0 && active[i]) c.att.push(i);
+    if (i >= 0 && cur[i] > 0) c.att.push(i);
   }
-  for (const c of list) { c.att.sort((a, b) => streak[b] - streak[a] || names[a].localeCompare(names[b])); c.top = c.att.length ? streak[c.att[0]] : 0; }
+  for (const c of list) { c.att.sort((a, b) => cur[b] - cur[a] || names[a].localeCompare(names[b])); c.top = c.att.length ? cur[c.att[0]] : 0; }
   upData = list;
   return list;
 }
@@ -379,13 +395,13 @@ function renderUpcoming(v) {
     if (!rows.length) { body.append(el("div", "msg", "Nothing matches. Try a lower streak.")); return; }
     const box = el("div", "list");
     for (const c of rows.slice(0, shown)) {
-      const k = c.att.filter(i => streak[i] >= upThr);
+      const k = c.att.filter(i => cur[i] >= upThr);
       const open = upOpen.has(c.id);
       const head = rowEl(shortDate(c.start), c.name, c.city + " · " + k.length + " active streak" + (k.length === 1 ? "" : "s") + " " + upThr + "+", String(c.top), true, () => { if (upOpen.has(c.id)) upOpen.delete(c.id); else upOpen.add(c.id); render(); });
       box.append(head);
       if (open) {
         const ex = el("div", "exp");
-        for (const i of k.slice(0, 40)) ex.append(item("", i));
+        for (const i of k.slice(0, 40)) ex.append(item("", i, null, cur[i]));
         if (k.length > 40) ex.append(el("div", "count", "Showing the top 40 of " + k.length));
         const a = el("a", "lnk", "Open this competition on the WCA site →");
         a.href = "https://www.worldcubeassociation.org/competitions/" + encodeURIComponent(c.id); a.target = "_blank"; a.rel = "noopener";
@@ -409,11 +425,11 @@ function renderAbout(v) {
   d.append(el("h1", null, "How this works"));
   add("What is a PR streak?", "The number of competitions in a row that a person attended where they set a personal record (PR) in at least one event. Competitions are taken in date order, and one competition without a PR ends the run.");
   add("What counts as a PR?", "A new best single or average in any event, compared with everything that person did before that competition. Matching your previous best counts too.");
-  add("What does the number on someone's page mean?", "It's their <b>longest ever</b> streak, not necessarily their current one. <b>Active</b> means that longest streak is still running as of their most recent competition. <b>Ended</b> means they've had a competition without a PR since.");
-  add("How are ranks worked out?", "Everyone is ranked by streak length. People with the same streak share the best rank and show it as T- (for example T-196). Country ranks only compare people from the same country. Active ranks only compare people whose streak is still running. \"Longer than\" is the share of all competitors whose longest streak is shorter.");
+  add("What do Longest, Current and Active mean?", "<b>Longest</b> is a person's best-ever streak. <b>Current</b> is the PR run they're on right now, counted back from their latest competition, and it can be shorter than their longest. <b>Active</b> means they have a current streak: their most recent competition had a PR. A person's page shows both numbers when they differ.");
+  add("How are ranks worked out?", "All-time rankings use each person\'s longest streak and Active rankings use their current streak. People with the same number share the best rank and show it as T- (for example T-196). Country ranks only compare people from the same country. Active ranks only compare people whose streak is still running. \"Longer than\" is the share of all competitors whose longest streak is shorter.");
   add("Why can't I find someone?", "People with no PR competitions, or who haven't competed yet, aren't listed. New results also take time to appear: the site rebuilds every night from the official WCA results export, which can lag a competition by a day or more.");
-  add("What is the This week tab?", "Streaks of 30 or more that grew or ended since the comparison date shown on that tab. It fills in once the site has a week of history.");
-  add("How does Upcoming and Next comp work?", "They use accepted registrations on the WCA site, refreshed nightly. Only people with a WCA ID appear, and pending or waitlisted registrations don't count. \"Next comp\" is the earliest upcoming competition someone is accepted for. Upcoming only counts people whose streak is still active, since only those streaks are still on the line.");
+  add("What is the This week tab?", "Current streaks of 30 or more that grew or ended since the comparison date shown on that tab. It fills in once the site has a week of history.");
+  add("How does Upcoming and Next comp work?", "They use accepted registrations on the WCA site, refreshed nightly. Only people with a WCA ID appear, and pending or waitlisted registrations don't count. \"Next comp\" is the earliest upcoming competition someone is accepted for. Upcoming only counts people with an active current streak, since only those streaks are still on the line.");
   add("Where is my My list saved?", "In this browser only. It won't follow you to another device or to the Home Screen version of the site. Use Copy and Import at the bottom of My list to move or back it up.");
   add("Where does the data come from?", "The official <a href=\"https://www.worldcubeassociation.org/export/results\" target=\"_blank\" rel=\"noopener\">WCA results export</a>. This is an unofficial fan-made tool and isn't affiliated with the WCA. The code is on <a href=\"https://github.com/EonicMystic/pr-streaks\" target=\"_blank\" rel=\"noopener\">GitHub</a>.");
   add("Something looks wrong", "Open a <a href=\"https://github.com/EonicMystic/pr-streaks/issues/new\" target=\"_blank\" rel=\"noopener\">GitHub issue</a>, or use the Report a problem link on a person's page. It needs a free GitHub account.");
@@ -438,17 +454,17 @@ function renderMine(v) {
   if (!w.length) {
     v.append(el("div", "msg", "No one on your list yet. Open anyone's page and tap Watch to add them."));
   } else {
-    w.sort((a, b) => active[b] - active[a] || streak[b] - streak[a] || names[a].localeCompare(names[b]));
-    v.append(el("div", "count", w.length + (w.length === 1 ? " person" : " people") + " · ranks are world all-time"));
+    w.sort((a, b) => cur[b] - cur[a] || streak[b] - streak[a] || names[a].localeCompare(names[b]));
+    v.append(el("div", "count", w.length + (w.length === 1 ? " person" : " people") + " · showing current streaks, ranked among world active"));
     const box = el("div", "list");
-    for (const i of w) { const b = item(fmtRank(rankIn(cntAll, streak[i])), i); b.dataset.id = ids[i]; box.append(b); }
+    for (const i of w) { const b = item(cur[i] > 0 ? fmtRank(rankIn(cntAct, cur[i])) : "—", i, null, cur[i]); if (!cur[i]) b.querySelector(".dot").remove(); b.querySelector(".c").textContent = cty[i] + " · Longest " + streak[i]; b.dataset.id = ids[i]; box.append(b); }
     v.append(box);
     loadNext().then(m => {
       for (const b of box.children) {
         if (!m.size) return;
         const x = m.get(b.dataset.id);
         const c = b.querySelector(".c"); c.style.whiteSpace = "normal";
-        c.textContent = cty[idx(b.dataset.id)] + " · Next: " + (x ? nextText(x) : "N/A");
+        const j = idx(b.dataset.id); c.textContent = cty[j] + " · Longest " + streak[j] + " · Next: " + (x ? nextText(x) : "N/A");
       }
     });
   }
@@ -471,7 +487,7 @@ function renderMine(v) {
 /* ---------- records ---------- */
 function topOf(counts) { for (let t = MAXS; t >= 1; t--) if (counts[t] > 0) return t; return 0; }
 function holders(s, needActive) {
-  const out = []; for (const i of buckets[s]) if (!needActive || active[i]) out.push(i);
+  const out = []; for (const i of (needActive ? runBuckets : buckets)[s]) out.push(i);
   return out.sort((a, b) => names[a].localeCompare(names[b]));
 }
 function recCard(title, num, whoText, sub, onclick) {
@@ -555,7 +571,8 @@ function renderBoard(v) {
   const { rows, more } = boardRows(tab, country, shown);
   if (!rows.length) { v.append(el("div", "msg", "No one to show.")); return; }
   const box = el("div", "list");
-  for (const r of rows) box.append(item(r.rank, r.i));
+  const isAct = tab === "worldAct" || tab === "countryAct";
+  for (const r of rows) box.append(item(r.rank, r.i, null, isAct ? r.val : undefined));
   v.append(box);
   if (more) {
     const b = el("button", "more", "Show more"); b.type = "button";
@@ -573,7 +590,7 @@ async function loadDetails() {
   details = new Map();
   try {
     const r = await fetch("data/details.csv", { cache: "no-cache" });
-    if (r.ok) { const L = (await r.text()).split("\n"); L.shift(); for (const ln of L) { if (!ln) continue; const p = parseLine(ln.replace(/\r$/, "")); details.set(p[0], { start: p[1], end: p[2], broke: p[3], recent: +p[4] || 0 }); } }
+    if (r.ok) { const L = (await r.text()).split("\n"); L.shift(); for (const ln of L) { if (!ln) continue; const p = parseLine(ln.replace(/\r$/, "")); details.set(p[0], { start: p[1], end: p[2], broke: p[3], recent: +p[4] || 0, cstart: p[5] || "" }); } }
   } catch (e) {}
   return details;
 }
@@ -584,11 +601,11 @@ function rarity(s) { let g = 0, e = 0; for (let t = s; t <= MAXS; t++) { if (t >
 function pct(x) { return x >= 99.995 ? "99.99" : x.toFixed(2); }
 
 function stats(i) {
-  const s = streak[i], ci = ctyIdx[i], a = !!active[i];
+  const s = streak[i], ci = ctyIdx[i], a = !!active[i], c = cur[i];
   return {
-    streak: s, a,
-    wAll: fmtRank(rankIn(cntAll, s)), wAct: a ? fmtRank(rankIn(cntAct, s)) : "—",
-    cAll: fmtRank(rankIn(ccAll[ci], s)), cAct: a ? fmtRank(rankIn(ccAct[ci], s)) : "—",
+    streak: s, a, cur: c,
+    wAll: fmtRank(rankIn(cntAll, s)), wAct: c > 0 ? fmtRank(rankIn(cntAct, c)) : "—",
+    cAll: fmtRank(rankIn(ccAll[ci], s)), cAct: c > 0 ? fmtRank(rankIn(ccAct[ci], c)) : "—",
     rar: pct(rarity(s)) + "%"
   };
 }
@@ -604,7 +621,7 @@ function flash(btn, text) { const o = btn.textContent; btn.textContent = text; s
 function personUrl(i) { return location.origin + location.pathname + "#p=" + encodeURIComponent(ids[i]); }
 
 async function shareLink(i, btn) {
-  const text = names[i] + " has a " + streak[i] + "-competition PR streak" + (active[i] ? " (still active)" : "") + ".";
+  const text = names[i] + " has a " + streak[i] + "-competition PR streak" + (active[i] ? " (still active)" : (cur[i] > 0 ? " (current streak: " + cur[i] + ")" : "")) + ".";
   try { if (navigator.share) { await navigator.share({ title: "PR Streak Rankings", text, url: personUrl(i) }); return; } }
   catch (e) { if (e && e.name === "AbortError") return; }
   try { await navigator.clipboard.writeText(personUrl(i)); flash(btn, "Link copied"); } catch (e) { flash(btn, "Copy the page address"); }
@@ -624,7 +641,8 @@ async function saveCard(i, btn) {
   g.fillStyle = "#9aa4b0"; g.font = "400 38px " + F; g.fillText(ids[i] + "  ·  " + cty[i], 72, 290);
   g.fillStyle = "#e6e9ee"; g.font = "800 300px " + F; g.fillText(String(st.streak), 72, 560);
   g.fillStyle = "#9aa4b0"; g.font = "400 38px " + F; g.fillText("competitions in a row with a PR", 72, 620);
-  g.fillStyle = st.a ? "#56d364" : "#9aa4b0"; g.font = "700 40px " + F; g.fillText(st.a ? "● Active streak" : "Ended", 72, 690);
+  g.fillStyle = st.cur > 0 ? "#56d364" : "#9aa4b0"; g.font = "700 40px " + F;
+  g.fillText(st.a ? "● Active streak" : (st.cur > 0 ? "Ended  ·  current streak " + st.cur : "Ended"), 72, 690);
   const cells = [["World all-time", st.wAll], ["World active", st.wAct], [cty[i] + " all-time", st.cAll], [cty[i] + " active", st.cAct]];
   cells.forEach((x, k) => {
     const cx = 72 + (k % 2) * 480, cy = 740 + Math.floor(k / 2) * 130;
@@ -657,27 +675,38 @@ function renderPerson(v, i) {
   h.append(a);
   d.append(h, el("div", "meta", ids[i] + " · " + cty[i]));
 
+  const c = cur[i];
   const big = el("div", "big");
-  big.append(el("b", null, String(streak[i])), el("span", "l", "competitions in a row with a PR"));
+  big.append(el("b", null, String(streak[i])), el("span", "l", active[i] ? "competitions in a row with a PR" : "longest streak"));
   d.append(big);
-  d.append(el("span", "badge" + (active[i] ? " on" : ""), active[i] ? "Active — streak still running" : "Ended"));
+  d.append(el("span", "badge" + (active[i] ? " on" : ""), active[i] ? "Active — streak still running" : "Longest streak ended"));
+  if (!active[i]) {
+    const big2 = el("div", "big");
+    big2.append(el("b", null, String(c)), el("span", "l", "current streak"));
+    d.append(big2);
+    d.append(el("span", "badge" + (c > 0 ? " on" : ""), c > 0 ? "Running now" : "Not running — latest comp had no PR"));
+  }
   d.append(el("div", "rar", "Longer than " + pct(rarity(streak[i])) + "% of all " + totalAll.toLocaleString() + " competitors with a PR streak."));
 
-  if (streak[i] <= 120) {
+  const dotsRow = (n, ring, endRed, cap) => {
     const tl = el("div", "tl"), dots = el("div", "dots");
-    for (let k = 0; k < streak[i]; k++) { const x = el("i"); if (active[i] && k === streak[i] - 1) x.className = "now"; dots.append(x); }
-    if (!active[i]) dots.append(el("i", "end"));
-    tl.append(dots, el("div", "cap", active[i] ? "One dot per competition in the streak. The ringed dot is the latest." : "One dot per competition in the streak. The red dot is the competition without a PR that ended it."));
-    d.append(tl);
+    for (let k = 0; k < n; k++) { const x = el("i"); if (ring && k === n - 1) x.className = "now"; dots.append(x); }
+    if (endRed) dots.append(el("i", "end"));
+    tl.append(dots, el("div", "cap", cap)); d.append(tl);
+  };
+  if (streak[i] <= 120) {
+    dotsRow(streak[i], active[i], !active[i], active[i] ? "One dot per competition in the streak. The ringed dot is the latest." : "Longest streak: one dot per competition. The red dot is the competition without a PR that ended it.");
   }
+  if (!active[i] && c > 0 && c <= 120) dotsRow(c, true, false, "Current streak: one dot per competition. The ringed dot is the latest.");
   const info = el("div", "info"); d.append(info);
   loadDetails().then(m => {
     if (!info.isConnected) return;
     const x = m.get(ids[i]), rows = [];
     if (x) {
-      rows.push(["Streak", x.start + " → " + (active[i] ? "still going" : x.end)]);
+      rows.push([active[i] ? "Streak" : "Longest", x.start + " → " + (active[i] ? "still going" : x.end)]);
       if (!active[i] && x.broke) rows.push(["Broke at", x.broke]);
-      if (active[i]) rows.push(["Pace", x.recent + " comps in the last 12 months (" + (x.recent / 12).toFixed(1) + "/month)"]);
+      if (!active[i] && c > 0 && x.cstart) rows.push(["Current", x.cstart + " → still going"]);
+      if (c > 0) rows.push(["Pace", x.recent + " comps in the last 12 months (" + (x.recent / 12).toFixed(1) + "/month)"]);
     } else rows.push(["Details", "Streak history is kept for streaks of 3 or more."]);
     for (const [l, t] of rows) { const r = el("div", "r"); r.append(el("span", null, l), el("b", null, t)); info.append(r); }
   });
@@ -698,24 +727,24 @@ function renderPerson(v, i) {
 
   const s = streak[i], ci = ctyIdx[i];
   const grid = el("div", "grid");
-  const box = (label, counts, on, ofWhat) => {
+  const box = (label, counts, on, ofWhat, val) => {
     const b = el("div", "box" + (on ? "" : " off"));
     b.append(el("span", null, label));
-    if (on) { const r = rankIn(counts, s); b.append(el("strong", null, fmtRank(r)), el("small", null, "of " + r.total.toLocaleString() + " " + ofWhat)); }
+    if (on) { const r = rankIn(counts, val); b.append(el("strong", null, fmtRank(r)), el("small", null, "of " + r.total.toLocaleString() + " " + ofWhat)); }
     else { b.append(el("strong", null, "—"), el("small", null, "Not active")); }
     return b;
   };
   grid.append(
-    box("World all-time", cntAll, true, "competitors"),
-    box("World active", cntAct, !!active[i], "active streaks"),
-    box(cty[i] + " all-time", ccAll[ci], true, "competitors"),
-    box(cty[i] + " active", ccAct[ci], !!active[i], "active streaks")
+    box("World all-time", cntAll, true, "competitors", s),
+    box("World active", cntAct, c > 0, "active streaks", c),
+    box(cty[i] + " all-time", ccAll[ci], true, "competitors", s),
+    box(cty[i] + " active", ccAct[ci], c > 0, "active streaks", c)
   );
   d.append(grid);
 
-  if (active[i]) {
+  if (c > 0) {
     const t = el("div", "target"); t.append(el("h3", null, "Next target"));
-    t.append(el("p", null, targetLine("World active", cntAct, s)), el("p", null, targetLine(cty[i] + " active", ccAct[ci], s)));
+    t.append(el("p", null, targetLine("World active", cntAct, c)), el("p", null, targetLine(cty[i] + " active", ccAct[ci], c)));
     d.append(t);
   }
 
@@ -767,8 +796,9 @@ function renderCompare(v, ia, ib) {
   };
   const rn = s => s === "—" ? 1e12 : +s.replace(/[^0-9]/g, "");
   row("Country", cty[A], cty[B]);
-  row("Streak", String(x.streak), String(y.streak), [-x.streak, -y.streak]);
-  row("Status", x.a ? "Active" : "Ended", y.a ? "Active" : "Ended");
+  row("Longest streak", String(x.streak), String(y.streak), [-x.streak, -y.streak]);
+  row("Longest is", x.a ? "Still going" : "Ended", y.a ? "Still going" : "Ended");
+  row("Current streak", String(x.cur), String(y.cur), [-x.cur, -y.cur]);
   row("World all-time", x.wAll, y.wAll, [rn(x.wAll), rn(y.wAll)]);
   row("World active", x.wAct, y.wAct, [rn(x.wAct), rn(y.wAct)]);
   row("Country all-time", x.cAll, y.cAll, [rn(x.cAll), rn(y.cAll)]);
