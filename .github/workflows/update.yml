@@ -1,4 +1,4 @@
-name: Update PR streak lists
+name: Update PR streaks
 
 on:
   schedule:
@@ -7,27 +7,43 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
-  update:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download latest WCA export
-        run: |
-          curl -L --fail --retry 3 -o "$RUNNER_TEMP/export.zip" \
-            "https://www.worldcubeassociation.org/export/results/v2/tsv"
+      - name: Download WCA export
+        run: curl -sSL --fail -o "$RUNNER_TEMP/export.zip" https://www.worldcubeassociation.org/export/results/v2/tsv
 
-      - name: Build streak lists
-        run: python3 build_streaks.py "$RUNNER_TEMP/export.zip" data
-
-      - name: Save results and squash history
+      - name: Build site
         run: |
-          git config user.name "streak-bot"
-          git config user.email "streak-bot@users.noreply.github.com"
-          git checkout --orphan fresh
-          git add -A
-          git commit -m "Update streaks $(date -u +%F)"
-          git push --force origin fresh:main
+          mkdir -p site/data history
+          python3 build_streaks.py "$RUNNER_TEMP/export.zip" site/data history
+          cp index.html site/index.html
+
+      - name: Save history snapshots
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git rm -r -q --ignore-unmatch data
+          git add history
+          git diff --cached --quiet || git commit -m "Update history"
+          git push
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
