@@ -97,6 +97,25 @@
   .cmp .h button { background: none; border: 0; color: var(--accent); font: inherit; font-weight: 700; text-align: left; padding: 0; cursor: pointer; }
   .cmp .l { color: var(--muted); font-size: .82rem; }
   .cmp .win { font-weight: 800; color: var(--good); }
+  .recs { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .rec { text-align: left; display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px 16px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; color: inherit; font: inherit; cursor: pointer; }
+  .rec:hover { background: var(--bg); }
+  .rec b { font-size: 2rem; line-height: 1; min-width: 56px; font-variant-numeric: tabular-nums; }
+  .rec .t { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+  .rec .w { font-weight: 600; }
+  .rec .s { color: var(--muted); font-size: .85rem; }
+  .dots { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+  .dots i { width: 11px; height: 11px; border-radius: 50%; background: var(--good); display: block; }
+  .dots i.end { background: #d1242f; }
+  .dots i.now { box-shadow: 0 0 0 3px var(--good-bg); }
+  .tl { margin-top: 14px; }
+  .tl .cap { color: var(--muted); font-size: .8rem; margin-top: 8px; }
+  .actions button.on { background: var(--tab-on); color: var(--tab-on-text); border-color: transparent; }
+  textarea { width: 100%; min-height: 84px; padding: 12px 14px; font: .85rem/1.4 ui-monospace, Menlo, monospace; color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: 10px; resize: vertical; }
+  .backup { margin-top: 22px; }
+  .backup h3 { margin: 0 0 4px; font-size: 1rem; }
+  .backup p { margin: 0 0 10px; color: var(--muted); font-size: .85rem; }
+  .backup .actions { margin-top: 10px; }
   .note { color: var(--muted); font-size: .8rem; margin-top: 22px; }
   .note a { color: var(--accent); }
 </style>
@@ -111,7 +130,7 @@
 
   <p class="note" id="updated"></p>
   <p class="note">
-    A streak is the most consecutive competitions a person attended where they set at least one PR (matching a PR counts).
+    Next competitions come from accepted registrations as of the last update. A streak is the most consecutive competitions a person attended where they set at least one PR (matching a PR counts).
     <b>Active</b> means the streak is still running at their most recent competition. Ranks marked T- are tied.
     This is an unofficial fan-made tool. Data comes from the
     <a href="https://www.worldcubeassociation.org/export/results" target="_blank" rel="noopener">official WCA results export</a>.
@@ -123,6 +142,7 @@ const PAGE = 40;
 const TABS = [
   { id: "lookup",    label: "Lookup" },
   { id: "week",      label: "This week" },
+  { id: "mine",      label: "My list" },
   { id: "worldAll",  label: "World all-time" },
   { id: "worldAct",  label: "World active" },
   { id: "countryAll", label: "Country all-time" },
@@ -264,10 +284,8 @@ function renderLookup(v) {
     list.replaceChildren();
     const found = findMatches(query);
     if (found === null) {
-      count.textContent = "Longest active streaks right now";
-      const box = el("div", "list");
-      for (const r of boardRows("worldAct", null, 10).rows) box.append(item(r.rank, r.i));
-      list.append(box); return;
+      count.textContent = "Records";
+      list.append(recordsEl()); return;
     }
     if (!found.length) { count.textContent = ""; list.append(el("div", "msg", "No one found. Check the spelling or try the WCA ID.")); return; }
     count.textContent = found.length > 40 ? "Showing 40 of " + found.length.toLocaleString() + " matches. Keep typing to narrow it." : found.length + (found.length === 1 ? " match" : " matches");
@@ -278,6 +296,98 @@ function renderLookup(v) {
   };
   let t; inp.addEventListener("input", () => { query = inp.value; clearTimeout(t); t = setTimeout(run, 150); });
   run();
+}
+
+/* ---------- next competition (from registrations) ---------- */
+let nextMap = null;
+async function loadNext() {
+  if (nextMap) return nextMap;
+  nextMap = new Map();
+  try {
+    const r = await fetch("data/next_comps.csv", { cache: "no-cache" });
+    if (r.ok) { const L = (await r.text()).split("\n"); L.shift(); for (const ln of L) { if (!ln) continue; const p = parseLine(ln.replace(/\r$/, "")); nextMap.set(p[0], { name: p[1], id: p[2], start: p[3], end: p[4], city: p[5] }); } }
+  } catch (e) {}
+  return nextMap;
+}
+function fmtDate(d) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || ""); if (!m) return d || "";
+  return new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+function nextText(x) { return x.name + " · " + fmtDate(x.start) + (x.city ? " · " + x.city : ""); }
+
+/* ---------- watchlist (saved in this browser) ---------- */
+let watchMem = null;
+function getWatch() {
+  if (watchMem) return watchMem;
+  let a = [];
+  try { const t = localStorage.getItem("watch"); if (t) a = JSON.parse(t); } catch (e) {}
+  watchMem = Array.isArray(a) ? a.filter(x => typeof x === "string") : [];
+  return watchMem;
+}
+function setWatch(a) { watchMem = a; try { localStorage.setItem("watch", JSON.stringify(a)); } catch (e) {} }
+function isWatched(id) { return getWatch().includes(id); }
+function toggleWatch(id) { const a = getWatch().slice(); const k = a.indexOf(id); if (k >= 0) a.splice(k, 1); else a.push(id); setWatch(a); return k < 0; }
+
+function renderMine(v) {
+  const w = getWatch().map(idx).filter(i => i >= 0);
+  if (!w.length) {
+    v.append(el("div", "msg", "No one on your list yet. Open anyone's page and tap Watch to add them."));
+  } else {
+    w.sort((a, b) => active[b] - active[a] || streak[b] - streak[a] || names[a].localeCompare(names[b]));
+    v.append(el("div", "count", w.length + (w.length === 1 ? " person" : " people") + " · ranks are world all-time"));
+    const box = el("div", "list");
+    for (const i of w) { const b = item(fmtRank(rankIn(cntAll, streak[i])), i); b.dataset.id = ids[i]; box.append(b); }
+    v.append(box);
+    loadNext().then(m => {
+      for (const b of box.children) {
+        const x = m.get(b.dataset.id);
+        if (x) { const c = b.querySelector(".c"); c.textContent = cty[idx(b.dataset.id)] + " · Next: " + nextText(x); c.style.whiteSpace = "normal"; }
+      }
+    });
+  }
+  const b = el("div", "backup");
+  b.append(el("h3", null, "Back up or move your list"));
+  b.append(el("p", null, "Your list is saved in this browser only. Copy the code below to keep it in Notes, or paste a code from another device and tap Import."));
+  const ta = el("textarea"); ta.value = getWatch().join(","); ta.spellcheck = false; ta.autocapitalize = "off";
+  const acts = el("div", "actions");
+  const cp = el("button", null, "Copy"); cp.type = "button";
+  cp.addEventListener("click", async () => { try { await navigator.clipboard.writeText(ta.value); flash(cp, "Copied"); } catch (e) { ta.focus(); ta.select(); flash(cp, "Select and copy"); } });
+  const im = el("button", null, "Import"); im.type = "button";
+  im.addEventListener("click", () => {
+    const found = (ta.value.toUpperCase().match(/\d{4}[A-Z]{4}\d{2}/g) || []).filter(x => idx(x) >= 0);
+    if (!found.length) { flash(im, "No valid IDs found"); return; }
+    setWatch([...new Set([...getWatch(), ...found])]); render();
+  });
+  acts.append(cp, im); b.append(ta, acts); v.append(b);
+}
+
+/* ---------- records ---------- */
+function topOf(counts) { for (let t = MAXS; t >= 1; t--) if (counts[t] > 0) return t; return 0; }
+function holders(s, needActive) {
+  const out = []; for (const i of buckets[s]) if (!needActive || active[i]) out.push(i);
+  return out.sort((a, b) => names[a].localeCompare(names[b]));
+}
+function recCard(title, num, whoText, sub, onclick) {
+  const b = el("button", "rec"); b.type = "button";
+  const d = el("div"); d.append(el("div", "t", title), el("div", "w", whoText), el("div", "s", sub));
+  b.append(el("b", null, String(num)), d); b.addEventListener("click", onclick); return b;
+}
+function holdersCard(title, s, needActive) {
+  const h = holders(s, needActive), first = h[0];
+  const more = h.length > 1 ? " + " + (h.length - 1) + " tied" : "";
+  return recCard(title, s, names[first] + more, cty[first] + (h.length > 1 ? " · tap to see the first of " + h.length : ""), () => openPerson(ids[first]));
+}
+function recordsEl() {
+  const box = el("div", "recs");
+  const a = topOf(cntAll), b = topOf(cntAct);
+  box.append(holdersCard("Longest streak ever", a, false), holdersCard("Longest active streak", b, true));
+  const slot = el("div"); box.append(slot);
+  loadWeek().then(d => {
+    const rows = d.lost; if (!rows.length || rows[0][1] === "") return;
+    const p = rows[0];
+    slot.append(recCard("Biggest streak ended this week", p[3], p[0], p[2] + (p[8] ? " · broke at " + p[8] : ""), () => openPerson(p[1])));
+  }).catch(() => {});
+  return box;
 }
 
 /* ---------- this week ---------- */
@@ -446,6 +556,13 @@ function renderPerson(v, i) {
   d.append(el("span", "badge" + (active[i] ? " on" : ""), active[i] ? "Active — streak still running" : "Ended"));
   d.append(el("div", "rar", "Longer than " + pct(rarity(streak[i])) + "% of all " + totalAll.toLocaleString() + " competitors with a PR streak."));
 
+  if (streak[i] <= 120) {
+    const tl = el("div", "tl"), dots = el("div", "dots");
+    for (let k = 0; k < streak[i]; k++) { const x = el("i"); if (active[i] && k === streak[i] - 1) x.className = "now"; dots.append(x); }
+    if (!active[i]) dots.append(el("i", "end"));
+    tl.append(dots, el("div", "cap", active[i] ? "One dot per competition in the streak. The ringed dot is the latest." : "One dot per competition in the streak. The red dot is the competition without a PR that ended it."));
+    d.append(tl);
+  }
   const info = el("div", "info"); d.append(info);
   loadDetails().then(m => {
     if (!info.isConnected) return;
@@ -456,6 +573,15 @@ function renderPerson(v, i) {
       if (active[i]) rows.push(["Pace", x.recent + " comps in the last 12 months (" + (x.recent / 12).toFixed(1) + "/month)"]);
     } else rows.push(["Details", "Streak history is kept for streaks of 3 or more."]);
     for (const [l, t] of rows) { const r = el("div", "r"); r.append(el("span", null, l), el("b", null, t)); info.append(r); }
+  });
+  loadNext().then(m => {
+    if (!info.isConnected) return;
+    const x = m.get(ids[i]); if (!x) return;
+    const r = el("div", "r"); r.append(el("span", null, "Next comp"));
+    const b = el("b"); const a2 = el("a", null, x.name);
+    a2.href = "https://www.worldcubeassociation.org/competitions/" + encodeURIComponent(x.id); a2.target = "_blank"; a2.rel = "noopener"; a2.style.color = "var(--accent)";
+    b.append(a2, document.createTextNode(" · " + fmtDate(x.start) + (x.city ? " · " + x.city : "")));
+    r.append(b); info.prepend(r);
   });
 
   const s = streak[i], ci = ctyIdx[i];
@@ -485,7 +611,9 @@ function renderPerson(v, i) {
   const sh = el("button", null, "Share"); sh.type = "button"; sh.addEventListener("click", () => shareLink(i, sh));
   const cd = el("button", null, "Save card"); cd.type = "button"; cd.addEventListener("click", () => saveCard(i, cd));
   const cp = el("button", null, "Compare"); cp.type = "button"; cp.addEventListener("click", () => openCompare(ids[i]));
-  acts.append(sh, cd, cp); d.append(acts);
+  const wt = el("button", isWatched(ids[i]) ? "on" : null, isWatched(ids[i]) ? "★ Watching" : "☆ Watch"); wt.type = "button";
+  wt.addEventListener("click", () => { const on = toggleWatch(ids[i]); wt.textContent = on ? "★ Watching" : "☆ Watch"; wt.className = on ? "on" : ""; });
+  acts.append(wt, sh, cd, cp); d.append(acts);
   v.append(d);
 }
 
@@ -549,7 +677,7 @@ function render() {
     window.scrollTo(0, 0); return;
   }
   $("tabs").style.display = ""; renderTabs();
-  if (tab === "lookup") renderLookup(v); else if (tab === "week") renderWeek(v); else renderBoard(v);
+  if (tab === "lookup") renderLookup(v); else if (tab === "week") renderWeek(v); else if (tab === "mine") renderMine(v); else renderBoard(v);
 }
 
 window.addEventListener("hashchange", render);
