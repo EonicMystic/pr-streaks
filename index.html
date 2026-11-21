@@ -78,6 +78,25 @@
   .box small { display: block; color: var(--muted); font-size: .75rem; margin-top: 1px; }
   .box.off strong { opacity: .4; }
 
+  .rar { color: var(--muted); font-size: .92rem; margin-top: 10px; }
+  .info { margin-top: 14px; border-top: 1px solid var(--line); }
+  .info .r { display: flex; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: .92rem; }
+  .info .r span { flex: 0 0 82px; color: var(--muted); }
+  .info .r b { font-weight: 600; flex: 1; }
+  .target { margin-top: 16px; background: var(--bg); border-radius: 10px; padding: 12px 14px; font-size: .92rem; }
+  .target h3 { margin: 0 0 6px; font-size: .8rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .target p { margin: 6px 0 0; }
+  .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+  .actions button { flex: 1 1 auto; padding: 11px 14px; font-size: .95rem; font-weight: 600; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+  .sub2 { display: flex; gap: 8px; margin-bottom: 12px; }
+  .sub2 button { flex: 1; padding: 10px; border-radius: 10px; font-size: .95rem; font-weight: 600; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+  .sub2 button[aria-pressed=true] { background: var(--tab-on); color: var(--tab-on-text); border-color: transparent; }
+  .cmp { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .cmp .h, .cmp .row { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--line); align-items: center; }
+  .cmp .row:last-child { border-bottom: 0; }
+  .cmp .h button { background: none; border: 0; color: var(--accent); font: inherit; font-weight: 700; text-align: left; padding: 0; cursor: pointer; }
+  .cmp .l { color: var(--muted); font-size: .82rem; }
+  .cmp .win { font-weight: 800; color: var(--good); }
   .note { color: var(--muted); font-size: .8rem; margin-top: 22px; }
   .note a { color: var(--accent); }
 </style>
@@ -103,6 +122,7 @@
 const PAGE = 40;
 const TABS = [
   { id: "lookup",    label: "Lookup" },
+  { id: "week",      label: "This week" },
   { id: "worldAll",  label: "World all-time" },
   { id: "worldAct",  label: "World active" },
   { id: "countryAll", label: "Country all-time" },
@@ -201,17 +221,28 @@ function boardRows(kind, country, limit) {
 /* ---------------- views ---------------- */
 let tab = "lookup", shown = PAGE, query = "", country = store("country") || "";
 
-function item(rank, i) {
+let idMap = null;
+function idx(id) { if (!idMap) { idMap = new Map(); for (let i = 0; i < N; i++) idMap.set(ids[i], i); } const v = idMap.get(id); return v === undefined ? -1 : v; }
+
+function rowEl(rank, name, sub, right, dot, onclick) {
   const b = el("button", "item");
   b.type = "button";
-  const r = el("div", "rk", rank);
   const who = el("div", "who");
-  who.append(el("div", "n", names[i]), el("div", "c", cty[i]));
-  const st = el("div", "st", String(streak[i]));
-  if (active[i]) st.append(el("span", "dot"));
-  b.append(r, who, st);
-  b.addEventListener("click", () => openPerson(ids[i]));
+  who.append(el("div", "n", name), el("div", "c", sub));
+  const st = el("div", "st", right);
+  if (dot) st.append(el("span", "dot"));
+  b.append(el("div", "rk", rank), who, st);
+  b.addEventListener("click", onclick);
   return b;
+}
+function item(rank, i, onclick) { return rowEl(rank, names[i], cty[i], String(streak[i]), active[i], onclick || (() => openPerson(ids[i]))); }
+
+function findMatches(q) {
+  q = fold(q.trim()); if (q.length < 2) return null;
+  const terms = q.split(/\s+/), found = [];
+  for (let i = 0; i < N; i++) { let ok = true; for (const t of terms) if (!hay[i].includes(t)) { ok = false; break; } if (ok) found.push(i); }
+  found.sort((a, b) => streak[b] - streak[a] || names[a].localeCompare(names[b]));
+  return found;
 }
 
 function renderTabs() {
@@ -230,19 +261,68 @@ function renderLookup(v) {
   const count = el("div", "count"); const list = el("div");
   v.append(inp, count, list);
   const run = () => {
-    const q = fold(query.trim()); list.replaceChildren();
-    if (q.length < 2) { count.textContent = ""; list.append(el("div", "msg", "Type at least 2 letters of a name or a WCA ID.")); return; }
-    const terms = q.split(/\s+/), found = [];
-    for (let i = 0; i < N; i++) { let ok = true; for (const t of terms) if (!hay[i].includes(t)) { ok = false; break; } if (ok) found.push(i); }
-    found.sort((a, b) => streak[b] - streak[a] || names[a].localeCompare(names[b]));
+    list.replaceChildren();
+    const found = findMatches(query);
+    if (found === null) {
+      count.textContent = "Longest active streaks right now";
+      const box = el("div", "list");
+      for (const r of boardRows("worldAct", null, 10).rows) box.append(item(r.rank, r.i));
+      list.append(box); return;
+    }
     if (!found.length) { count.textContent = ""; list.append(el("div", "msg", "No one found. Check the spelling or try the WCA ID.")); return; }
-    count.textContent = found.length > 40 ? "Showing 40 of " + found.length.toLocaleString() + " matches. Keep typing to narrow it." : found.length + (found.length === 1 ? " match" : " matches") + " · ranks are world all-time";
+    count.textContent = found.length > 40 ? "Showing 40 of " + found.length.toLocaleString() + " matches. Keep typing to narrow it." : found.length + (found.length === 1 ? " match" : " matches");
+    count.textContent += " · ranks are world all-time";
     const box = el("div", "list");
     for (const i of found.slice(0, 40)) box.append(item(fmtRank(rankIn(cntAll, streak[i])), i));
     list.append(box);
   };
   let t; inp.addEventListener("input", () => { query = inp.value; clearTimeout(t); t = setTimeout(run, 150); });
   run();
+}
+
+/* ---------- this week ---------- */
+let weekData = null, weekSub = "gained";
+async function loadWeek() {
+  if (weekData) return weekData;
+  const get = async f => { const r = await fetch("data/" + f, { cache: "no-cache" }); if (!r.ok) throw new Error(f); const L = (await r.text()).split("\n"); L.shift(); return L.filter(x => x).map(x => parseLine(x.replace(/\r$/, ""))); };
+  weekData = { gained: await get("gained.csv"), lost: await get("lost.csv") };
+  return weekData;
+}
+const fr = x => !x || x === "——" ? "—" : (x.startsWith("T-") ? x : "#" + x);
+function renderWeek(v) {
+  const sub = el("div", "sub2");
+  for (const [k, label] of [["gained", "Gained a PR"], ["lost", "Lost a streak"]]) {
+    const b = el("button", null, label); b.type = "button"; b.setAttribute("aria-pressed", weekSub === k ? "true" : "false");
+    b.addEventListener("click", () => { weekSub = k; shown = PAGE; render(); });
+    sub.append(b);
+  }
+  const body = el("div"); v.append(sub, body);
+  body.append(el("div", "msg", "Loading…"));
+  loadWeek().then(d => {
+    if (!body.isConnected) return;
+    body.replaceChildren();
+    const rows = d[weekSub];
+    if (!rows.length || rows[0][1] === "") { body.append(el("div", "msg", rows.length ? rows[0][0] : "Nothing to show.")); return; }
+    const since = rows[0][rows[0].length - 1];
+    body.append(el("div", "count", (weekSub === "gained" ? "Active streaks of 30+ that grew" : "Streaks of 30+ that ended") + " since " + since + ". " + rows.length + " total."));
+    const box = el("div", "list");
+    for (const p of rows.slice(0, shown)) {
+      const i = idx(p[1]);
+      const click = () => openPerson(p[1]);
+      if (weekSub === "gained") {
+        const g = p[5] === "——" ? "New" : "+" + p[5];
+        box.append(rowEl(g, p[0], p[2] + " · was " + p[3] + " · world active " + fr(p[6]) + " · all-time " + fr(p[7]), p[4], true, click));
+      } else {
+        box.append(rowEl("Ended", p[0], p[2] + (p[8] ? " · broke at " + p[8] : "") + " · all-time " + fr(p[4]), p[3], false, click));
+      }
+    }
+    body.append(box);
+    if (rows.length > shown) {
+      const m = el("button", "more", "Show more"); m.type = "button";
+      m.addEventListener("click", () => { shown += PAGE; render(); });
+      body.append(m);
+    }
+  }).catch(() => { body.replaceChildren(el("div", "msg", "Couldn't load this week's changes.")); });
 }
 
 function renderBoard(v) {
@@ -268,12 +348,92 @@ function renderBoard(v) {
 }
 
 function openPerson(id) { location.hash = "p=" + encodeURIComponent(id); }
+function openCompare(a, b) { location.hash = "c=" + encodeURIComponent(a) + (b ? "," + encodeURIComponent(b) : ""); }
 
-function renderPerson(v, i) {
+let details = null;
+async function loadDetails() {
+  if (details) return details;
+  details = new Map();
+  try {
+    const r = await fetch("data/details.csv", { cache: "no-cache" });
+    if (r.ok) { const L = (await r.text()).split("\n"); L.shift(); for (const ln of L) { if (!ln) continue; const p = parseLine(ln.replace(/\r$/, "")); details.set(p[0], { start: p[1], end: p[2], broke: p[3], recent: +p[4] || 0 }); } }
+  } catch (e) {}
+  return details;
+}
+
+function rankAt(counts, v) { let g = 0; for (let t = v + 1; t <= MAXS; t++) g += counts[t]; return { rank: g + 1, tied: counts[v] > 0 }; }
+function nextAbove(counts, s) { for (let t = s + 1; t <= MAXS; t++) if (counts[t] > 0) return t; return 0; }
+function rarity(s) { let g = 0, e = 0; for (let t = s; t <= MAXS; t++) { if (t > s) g += cntAll[t]; else e = cntAll[t]; } return 100 * (1 - (g + e) / totalAll); }
+function pct(x) { return x >= 99.995 ? "99.99" : x.toFixed(2); }
+
+function stats(i) {
+  const s = streak[i], ci = ctyIdx[i], a = !!active[i];
+  return {
+    streak: s, a,
+    wAll: fmtRank(rankIn(cntAll, s)), wAct: a ? fmtRank(rankIn(cntAct, s)) : "—",
+    cAll: fmtRank(rankIn(ccAll[ci], s)), cAct: a ? fmtRank(rankIn(ccAct[ci], s)) : "—",
+    rar: pct(rarity(s)) + "%"
+  };
+}
+
+function targetLine(label, counts, s) {
+  const n = nextAbove(counts, s);
+  if (!n) return label + ": already the longest active streak.";
+  const k = counts[n], gap = n - s, r = rankAt(counts, n + 1);
+  return label + ": " + gap + " more PR comp" + (gap > 1 ? "s" : "") + " ties " + k + (k > 1 ? " people" : " person") + " at " + n + "; " + (gap + 1) + " more would reach #" + r.rank.toLocaleString() + ".";
+}
+
+function flash(btn, text) { const o = btn.textContent; btn.textContent = text; setTimeout(() => { btn.textContent = o; }, 1800); }
+function personUrl(i) { return location.origin + location.pathname + "#p=" + encodeURIComponent(ids[i]); }
+
+async function shareLink(i, btn) {
+  const text = names[i] + " has a " + streak[i] + "-competition PR streak" + (active[i] ? " (still active)" : "") + ".";
+  try { if (navigator.share) { await navigator.share({ title: "PR Streak Rankings", text, url: personUrl(i) }); return; } }
+  catch (e) { if (e && e.name === "AbortError") return; }
+  try { await navigator.clipboard.writeText(personUrl(i)); flash(btn, "Link copied"); } catch (e) { flash(btn, "Copy the page address"); }
+}
+
+async function saveCard(i, btn) {
+  const st = stats(i), W = 1080, H = 1080;
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const g = c.getContext("2d");
+  g.fillStyle = "#0e1116"; g.fillRect(0, 0, W, H);
+  const F = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+  g.textBaseline = "alphabetic";
+  g.fillStyle = "#9aa4b0"; g.font = "600 36px " + F; g.fillText("PR STREAK RANKINGS", 72, 110);
+  g.fillStyle = "#e6e9ee"; let fs = 76; g.font = "700 " + fs + "px " + F;
+  while (g.measureText(names[i]).width > W - 144 && fs > 36) { fs -= 4; g.font = "700 " + fs + "px " + F; }
+  g.fillText(names[i], 72, 230);
+  g.fillStyle = "#9aa4b0"; g.font = "400 38px " + F; g.fillText(ids[i] + "  ·  " + cty[i], 72, 290);
+  g.fillStyle = "#e6e9ee"; g.font = "800 300px " + F; g.fillText(String(st.streak), 72, 560);
+  g.fillStyle = "#9aa4b0"; g.font = "400 38px " + F; g.fillText("competitions in a row with a PR", 72, 620);
+  g.fillStyle = st.a ? "#56d364" : "#9aa4b0"; g.font = "700 40px " + F; g.fillText(st.a ? "● Active streak" : "Ended", 72, 690);
+  const cells = [["World all-time", st.wAll], ["World active", st.wAct], [cty[i] + " all-time", st.cAll], [cty[i] + " active", st.cAct]];
+  cells.forEach((x, k) => {
+    const cx = 72 + (k % 2) * 480, cy = 740 + Math.floor(k / 2) * 130;
+    g.fillStyle = "#171b22"; g.fillRect(cx, cy, 456, 112);
+    g.fillStyle = "#9aa4b0"; g.font = "400 28px " + F; g.fillText(x[0], cx + 20, cy + 38);
+    g.fillStyle = "#e6e9ee"; g.font = "700 48px " + F; g.fillText(x[1], cx + 20, cy + 92);
+  });
+  g.fillStyle = "#9aa4b0"; g.font = "400 28px " + F; g.fillText(location.host + location.pathname.replace(/index\.html$/, ""), 72, 1040);
+  const blob = await new Promise(r => c.toBlob(r, "image/png"));
+  if (!blob) { flash(btn, "Couldn't make card"); return; }
+  const file = new File([blob], "pr-streak-" + ids[i] + ".png", { type: "image/png" });
+  try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); return; } }
+  catch (e) { if (e && e.name === "AbortError") return; }
+  const url = URL.createObjectURL(blob), a = document.createElement("a");
+  a.href = url; a.download = file.name; document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000); flash(btn, "Card saved");
+}
+
+function backBtn(v) {
   const back = el("button", "back", "← Back"); back.type = "button";
   back.addEventListener("click", () => { if (history.length > 1) history.back(); else { history.replaceState(null, "", location.pathname); render(); } });
   v.append(back);
+}
 
+function renderPerson(v, i) {
+  backBtn(v);
   const d = el("div", "detail");
   const h = el("h2"); const a = el("a", null, names[i]);
   a.href = "https://www.worldcubeassociation.org/persons/" + encodeURIComponent(ids[i]); a.target = "_blank"; a.rel = "noopener";
@@ -284,6 +444,19 @@ function renderPerson(v, i) {
   big.append(el("b", null, String(streak[i])), el("span", "l", "competitions in a row with a PR"));
   d.append(big);
   d.append(el("span", "badge" + (active[i] ? " on" : ""), active[i] ? "Active — streak still running" : "Ended"));
+  d.append(el("div", "rar", "Longer than " + pct(rarity(streak[i])) + "% of all " + totalAll.toLocaleString() + " competitors with a PR streak."));
+
+  const info = el("div", "info"); d.append(info);
+  loadDetails().then(m => {
+    if (!info.isConnected) return;
+    const x = m.get(ids[i]), rows = [];
+    if (x) {
+      rows.push(["Streak", x.start + " → " + (active[i] ? "still going" : x.end)]);
+      if (!active[i] && x.broke) rows.push(["Broke at", x.broke]);
+      if (active[i]) rows.push(["Pace", x.recent + " comps in the last 12 months (" + (x.recent / 12).toFixed(1) + "/month)"]);
+    } else rows.push(["Details", "Streak history is kept for streaks of 3 or more."]);
+    for (const [l, t] of rows) { const r = el("div", "r"); r.append(el("span", null, l), el("b", null, t)); info.append(r); }
+  });
 
   const s = streak[i], ci = ctyIdx[i];
   const grid = el("div", "grid");
@@ -301,19 +474,82 @@ function renderPerson(v, i) {
     box(cty[i] + " active", ccAct[ci], !!active[i], "active streaks")
   );
   d.append(grid);
+
+  if (active[i]) {
+    const t = el("div", "target"); t.append(el("h3", null, "Next target"));
+    t.append(el("p", null, targetLine("World active", cntAct, s)), el("p", null, targetLine(cty[i] + " active", ccAct[ci], s)));
+    d.append(t);
+  }
+
+  const acts = el("div", "actions");
+  const sh = el("button", null, "Share"); sh.type = "button"; sh.addEventListener("click", () => shareLink(i, sh));
+  const cd = el("button", null, "Save card"); cd.type = "button"; cd.addEventListener("click", () => saveCard(i, cd));
+  const cp = el("button", null, "Compare"); cp.type = "button"; cp.addEventListener("click", () => openCompare(ids[i]));
+  acts.append(sh, cd, cp); d.append(acts);
   v.append(d);
+}
+
+function renderCompare(v, ia, ib) {
+  backBtn(v);
+  const A = idx(ia);
+  if (A < 0) { v.append(el("div", "msg", "Person not found.")); return; }
+  const B = ib ? idx(ib) : -1;
+  if (B < 0) {
+    v.append(el("div", "count", "Compare " + names[A] + " with…"));
+    const inp = el("input"); inp.type = "search"; inp.placeholder = "Search a name or WCA ID…"; inp.autocomplete = "off"; inp.autocapitalize = "off"; inp.spellcheck = false;
+    const list = el("div"); v.append(inp, list);
+    let t; inp.addEventListener("input", () => {
+      clearTimeout(t); t = setTimeout(() => {
+        list.replaceChildren(); const f = findMatches(inp.value);
+        if (f === null) return;
+        if (!f.length) { list.append(el("div", "msg", "No one found.")); return; }
+        const box = el("div", "list");
+        for (const j of f.slice(0, 30)) box.append(item("", j, () => { history.replaceState(null, "", "#c=" + encodeURIComponent(ia) + "," + encodeURIComponent(ids[j])); render(); }));
+        list.append(box);
+      }, 150);
+    });
+    return;
+  }
+  const x = stats(A), y = stats(B);
+  const t = el("div", "cmp");
+  const h = el("div", "h"); h.append(el("span"));
+  for (const j of [A, B]) { const b = el("button", null, names[j]); b.type = "button"; b.addEventListener("click", () => openPerson(ids[j])); h.append(b); }
+  t.append(h);
+  const row = (label, p, q, num) => {
+    const r = el("div", "row"); r.append(el("span", "l", label));
+    const c1 = el("span", null, p), c2 = el("span", null, q);
+    if (num !== undefined && num[0] !== num[1]) (num[0] < num[1] ? c1 : c2).className = "win";
+    r.append(c1, c2); t.append(r);
+  };
+  const rn = s => s === "—" ? 1e12 : +s.replace(/[^0-9]/g, "");
+  row("Country", cty[A], cty[B]);
+  row("Streak", String(x.streak), String(y.streak), [-x.streak, -y.streak]);
+  row("Status", x.a ? "Active" : "Ended", y.a ? "Active" : "Ended");
+  row("World all-time", x.wAll, y.wAll, [rn(x.wAll), rn(y.wAll)]);
+  row("World active", x.wAct, y.wAct, [rn(x.wAct), rn(y.wAct)]);
+  row("Country all-time", x.cAll, y.cAll, [rn(x.cAll), rn(y.cAll)]);
+  row("Country active", x.cAct, y.cAct, [rn(x.cAct), rn(y.cAct)]);
+  row("Longer than", x.rar, y.rar);
+  v.append(t);
+  v.append(el("div", "count", "Country ranks are within each person's own country."));
 }
 
 function render() {
   const v = $("view"); v.replaceChildren();
-  const m = /^#p=(.+)$/.exec(location.hash);
+  let m = /^#p=(.+)$/.exec(location.hash);
   if (m) {
-    const id = decodeURIComponent(m[1]); const i = ids.indexOf(id);
+    const i = idx(decodeURIComponent(m[1]));
     $("tabs").style.display = "none";
     if (i >= 0) { renderPerson(v, i); window.scrollTo(0, 0); return; }
   }
+  m = /^#c=([^,]+)(?:,(.+))?$/.exec(location.hash);
+  if (m) {
+    $("tabs").style.display = "none";
+    renderCompare(v, decodeURIComponent(m[1]), m[2] ? decodeURIComponent(m[2]) : "");
+    window.scrollTo(0, 0); return;
+  }
   $("tabs").style.display = ""; renderTabs();
-  if (tab === "lookup") renderLookup(v); else renderBoard(v);
+  if (tab === "lookup") renderLookup(v); else if (tab === "week") renderWeek(v); else renderBoard(v);
 }
 
 window.addEventListener("hashchange", render);
