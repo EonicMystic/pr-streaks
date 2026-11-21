@@ -5,7 +5,7 @@ Usage: python3 fetch_registrations.py <output_dir>
 Writes <output_dir>/next_comps.csv. Never fails the build: if nothing usable is found
 the file is removed and the site simply hides the "Next comp" lines.
 """
-import sys, os, re, json, csv, time, datetime, urllib.request, urllib.error
+import sys, os, re, json, csv, time, datetime, threading, urllib.request, urllib.error
 from concurrent.futures import ThreadPoolExecutor
 
 BASE = os.environ.get('WCA_BASE', 'https://www.worldcubeassociation.org').rstrip('/')
@@ -14,17 +14,32 @@ ID_RE = re.compile(r'/persons/(\d{4}[A-Z]{4}\d{2})')
 DEADLINE = time.time() + 15 * 60
 
 
-def get(path, tries=3):
+_lock = threading.Lock()
+_pause_until = 0.0
+
+
+def get(path, tries=6):
+    global _pause_until
     for k in range(tries):
         if time.time() > DEADLINE:
             return 0, ''
+        wait = _pause_until - time.time()
+        if wait > 0:
+            time.sleep(min(wait, 60))
         try:
             req = urllib.request.Request(BASE + path, headers={'User-Agent': UA, 'Accept': 'application/json, text/html'})
             with urllib.request.urlopen(req, timeout=30) as r:
                 return r.status, r.read().decode('utf-8', 'replace')
         except urllib.error.HTTPError as e:
             if e.code in (429, 500, 502, 503, 504) and k < tries - 1:
-                time.sleep(2 * (k + 1)); continue
+                try:
+                    ra = float(e.headers.get('Retry-After', ''))
+                except Exception:
+                    ra = 0
+                delay = max(ra, 8 * (k + 1)) if e.code == 429 else 3 * (k + 1)
+                with _lock:
+                    _pause_until = max(_pause_until, time.time() + delay)   # everyone pauses, not just this request
+                continue
             return e.code, ''
         except Exception:
             if k < tries - 1:
@@ -66,12 +81,6 @@ def registrants(cid):
             if w and status in (None, 'accepted'):
                 out.add(w)
         return out, 'wcif'
-    # 2) public registrations page
-    st, body = get(f'/competitions/{cid}/registrations')
-    if st == 200:
-        out = set(ID_RE.findall(body))
-        if out:
-            return out, 'html'
     return None, 'none'
 
 
@@ -107,13 +116,24 @@ def main():
     print(f'upcoming competitions found: {len(comps)}')
 
     def work(cid):
-        time.sleep(0.05)
+        time.sleep(0.15)
         return cid, registrants(cid)
 
     results = {}
-    with ThreadPoolExecutor(max_workers=16) as ex:
+    with ThreadPoolExecutor(max_workers=5) as ex:
         for cid, (ids, src) in ex.map(work, list(comps)):
             results[cid] = (ids, src)
+
+    # second and third pass for anything that failed (usually rate limiting), after a cooldown
+    for attempt in range(2):
+        failed = [c for c, v in results.items() if v[0] is None]
+        if not failed or time.time() > DEADLINE:
+            break
+        print(f'retrying {len(failed)} competitions after a short pause')
+        time.sleep(20)
+        for cid in failed:
+            results[cid] = registrants(cid)
+            time.sleep(0.5)
 
     sources = {}
     for ids, src in results.values():
