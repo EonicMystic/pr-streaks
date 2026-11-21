@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '30 3 * * *'
   workflow_dispatch:
+    inputs:
+      refresh_registrations:
+        description: 'Refresh next competitions (adds about 9 minutes)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -32,9 +37,21 @@ jobs:
           python3 build_streaks.py "$RUNNER_TEMP/export.zip" site/data history
           cp index.html site/index.html
 
-      - name: Upcoming registrations
+      - name: Next competitions
         continue-on-error: true
-        run: python3 fetch_registrations.py site/data
+        env:
+          FULL: ${{ github.event_name != 'workflow_dispatch' || inputs.refresh_registrations }}
+          LIVE: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data/next_comps.csv
+        run: |
+          if [ "$FULL" != "true" ]; then
+            if curl -sSL --fail -o site/data/next_comps.csv "$LIVE" && [ "$(wc -l < site/data/next_comps.csv)" -gt 100 ]; then
+              echo "Reused the next competitions already on the live site"
+              exit 0
+            fi
+            rm -f site/data/next_comps.csv
+            echo "No usable live copy found, doing a full refresh"
+          fi
+          python3 fetch_registrations.py site/data
 
       - name: Save history snapshots
         run: |
