@@ -676,28 +676,29 @@ function renderPerson(v, i) {
   d.append(h, el("div", "meta", ids[i] + " · " + cty[i]));
 
   const c = cur[i];
-  const big = el("div", "big");
-  big.append(el("b", null, String(streak[i])), el("span", "l", active[i] ? "competitions in a row with a PR" : "longest streak"));
-  d.append(big);
-  d.append(el("span", "badge" + (active[i] ? " on" : ""), active[i] ? "Active — streak still running" : "Longest streak ended"));
-  if (!active[i]) {
-    const big2 = el("div", "big");
-    big2.append(el("b", null, String(c)), el("span", "l", "current streak"));
-    d.append(big2);
-    d.append(el("span", "badge" + (c > 0 ? " on" : ""), c > 0 ? "Running now" : "Not running — latest comp had no PR"));
-  }
-  d.append(el("div", "rar", "Longer than " + pct(rarity(streak[i])) + "% of all " + totalAll.toLocaleString() + " competitors with a PR streak."));
-
   const dotsRow = (n, ring, endRed, cap) => {
     const tl = el("div", "tl"), dots = el("div", "dots");
     for (let k = 0; k < n; k++) { const x = el("i"); if (ring && k === n - 1) x.className = "now"; dots.append(x); }
     if (endRed) dots.append(el("i", "end"));
     tl.append(dots, el("div", "cap", cap)); d.append(tl);
   };
+  // longest streak: number, status, how rare, dots
+  const big = el("div", "big");
+  big.append(el("b", null, String(streak[i])), el("span", "l", active[i] ? "competitions in a row with a PR" : "longest streak"));
+  d.append(big);
+  d.append(el("span", "badge" + (active[i] ? " on" : ""), active[i] ? "Active — streak still running" : "Longest streak ended"));
+  d.append(el("div", "rar", "Longer than " + pct(rarity(streak[i])) + "% of all " + totalAll.toLocaleString() + " competitors with a PR streak."));
   if (streak[i] <= 120) {
     dotsRow(streak[i], active[i], !active[i], active[i] ? "One dot per competition in the streak. The ringed dot is the latest." : "Longest streak: one dot per competition. The red dot is the competition without a PR that ended it.");
   }
-  if (!active[i] && c > 0 && c <= 120) dotsRow(c, true, false, "Current streak: one dot per competition. The ringed dot is the latest.");
+  // current streak (only shown separately when the longest one has ended)
+  if (!active[i]) {
+    const big2 = el("div", "big");
+    big2.append(el("b", null, String(c)), el("span", "l", "current streak"));
+    d.append(big2);
+    d.append(el("span", "badge" + (c > 0 ? " on" : ""), c > 0 ? "Running now" : "Not running — latest comp had no PR"));
+    if (c > 0 && c <= 120) dotsRow(c, true, false, "Current streak: one dot per competition. The ringed dot is the latest.");
+  }
   const info = el("div", "info"); d.append(info);
   loadDetails().then(m => {
     if (!info.isConnected) return;
