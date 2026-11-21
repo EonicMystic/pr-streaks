@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR Streak Lookup</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #16191d; --muted: #5d6671; --line: #e1e4e8;
+    --accent: #1f6feb; --good: #1a7f37; --good-bg: #dcf5e3; --off-bg: #eceff2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1116; --card: #171b22; --text: #e6e9ee; --muted: #9aa4b0; --line: #2a303a;
+      --accent: #58a6ff; --good: #56d364; --good-bg: #12351f; --off-bg: #232a33;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 1.5rem; margin: 8px 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 16px; font-size: .95rem; }
+  .controls { display: grid; gap: 10px; margin-bottom: 14px; }
+  input[type=search], select {
+    width: 100%; padding: 12px 14px; font-size: 1rem; color: var(--text);
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  }
+  input[type=search]:focus, select:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row select { flex: 1 1 180px; width: auto; }
+  label.chk { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .95rem; }
+  label.chk input { width: 18px; height: 18px; }
+  .count { color: var(--muted); font-size: .9rem; margin: 6px 2px 10px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; margin-bottom: 10px;
+  }
+  .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .name { font-weight: 650; font-size: 1.05rem; }
+  .name a { color: inherit; text-decoration: none; }
+  .name a:hover { color: var(--accent); text-decoration: underline; }
+  .meta { color: var(--muted); font-size: .88rem; margin-top: 2px; }
+  .streak { text-align: right; }
+  .streak b { font-size: 1.9rem; line-height: 1; display: block; }
+  .badge {
+    display: inline-block; margin-top: 4px; padding: 2px 9px; border-radius: 999px;
+    font-size: .75rem; font-weight: 600; background: var(--off-bg); color: var(--muted);
+  }
+  .badge.on { background: var(--good-bg); color: var(--good); }
+  .ranks { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 12px; }
+  .rk { background: var(--bg); border-radius: 8px; padding: 8px 10px; }
+  .rk span { display: block; color: var(--muted); font-size: .75rem; }
+  .rk strong { font-size: 1.05rem; }
+  .foot { color: var(--muted); font-size: .85rem; margin-top: 10px; }
+  .msg { color: var(--muted); text-align: center; padding: 28px 8px; }
+  .note { color: var(--muted); font-size: .8rem; margin-top: 22px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>PR Streak Lookup</h1>
+  <p class="sub">Longest streak of consecutive competitions with a PR. Search by name, WCA ID or country.</p>
+
+  <div class="controls">
+    <input id="q" type="search" placeholder="Search name or WCA ID…" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div class="row">
+      <select id="country"><option value="">All countries</option></select>
+      <label class="chk"><input id="active" type="checkbox"> Active streaks only</label>
+    </div>
+  </div>
+
+  <div id="count" class="count"></div>
+  <div id="results"></div>
+
+  <p class="note" id="updated"></p>
+  <p class="note">A streak is the most consecutive competitions a person attended where they set at least one PR (a tie counts).
+  "Active" means the streak is still running at the person's most recent competition. Only people with a streak of 5 or more are listed.
+  Ranks marked T- are tied. Data comes from the official WCA results export.</p>
+</div>
+
+<script>
+// Where the data lives. The raw GitHub address is always the freshest; the relative one is a backup.
+const DATA_URLS = [
+  "https://raw.githubusercontent.com/EonicMystic/pr-streaks/main/data/search.csv",
+  "data/search.csv"
+];
+const UPDATED_URLS = [
+  "https://raw.githubusercontent.com/EonicMystic/pr-streaks/main/data/updated.csv",
+  "data/updated.csv"
+];
+const MAX_SHOWN = 40;
+
+const $ = id => document.getElementById(id);
+let rows = [];
+
+function parseCSV(text) {
+  const out = []; let row = [], field = "", inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
+      else field += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n") { row.push(field); out.push(row); row = []; field = ""; }
+    else if (c !== "\r") field += c;
+  }
+  if (field !== "" || row.length) { row.push(field); out.push(row); }
+  return out;
+}
+
+async function fetchFirst(urls) {
+  let lastErr;
+  for (const u of urls) {
+    try {
+      const r = await fetch(u, { cache: "no-cache" });
+      if (r.ok) return await r.text();
+      lastErr = new Error(r.status);
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr;
+}
+
+const fold = s => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function rank(label, value) {
+  const d = el("div", "rk");
+  d.append(el("span", null, label), el("strong", null, value === "——" ? "—" : (value.startsWith("T-") ? value : "#" + value)));
+  if (value === "——") d.style.opacity = ".45";
+  return d;
+}
+
+function card(p) {
+  const c = el("div", "card");
+  const top = el("div", "top");
+  const left = el("div");
+  const nm = el("div", "name");
+  const a = el("a", null, p.name);
+  a.href = "https://www.worldcubeassociation.org/persons/" + encodeURIComponent(p.id);
+  a.target = "_blank"; a.rel = "noopener";
+  nm.append(a);
+  left.append(nm, el("div", "meta", p.id + " · " + p.country));
+  const right = el("div", "streak");
+  const b = el("b", null, p.streak);
+  right.append(b, el("span", "badge" + (p.active ? " on" : ""), p.active ? "Active" : "Ended"));
+  top.append(left, right);
+  c.append(top);
+
+  const grid = el("div", "ranks");
+  grid.append(rank("World all-time", p.wAll));
+  if (p.active) grid.append(rank("World active", p.wAct));
+  if (p.country === "USA") {
+    grid.append(rank("USA all-time", p.uAll));
+    if (p.active) grid.append(rank("USA active", p.uAct));
+  }
+  c.append(grid);
+
+  const per = (p.comps / 12).toFixed(1);
+  const span = p.active ? p.start + " → still going" : p.start + " → " + p.end;
+  c.append(el("div", "foot", span + " · " + p.comps + " comps in the last 12 months (" + per + "/month)"));
+  return c;
+}
+
+function render() {
+  const q = fold($("q").value.trim());
+  const country = $("country").value;
+  const onlyActive = $("active").checked;
+  const terms = q ? q.split(/\s+/) : [];
+  const found = [];
+  for (const p of rows) {
+    if (onlyActive && !p.active) continue;
+    if (country && p.country !== country) continue;
+    let ok = true;
+    for (const t of terms) if (!p.hay.includes(t)) { ok = false; break; }
+    if (ok) found.push(p);
+  }
+  const box = $("results");
+  box.replaceChildren();
+  if (!found.length) {
+    box.append(el("div", "msg", "No match. Only people with a streak of 5 or more are listed."));
+    $("count").textContent = "";
+    return;
+  }
+  const shown = found.slice(0, MAX_SHOWN);
+  for (const p of shown) box.append(card(p));
+  $("count").textContent = found.length > MAX_SHOWN
+    ? "Showing the top " + MAX_SHOWN + " of " + found.length.toLocaleString() + " people. Narrow your search to see others."
+    : found.length + (found.length === 1 ? " person" : " people");
+}
+
+let timer;
+function later() { clearTimeout(timer); timer = setTimeout(render, 120); }
+
+async function init() {
+  $("results").append(el("div", "msg", "Loading…"));
+  try {
+    const text = await fetchFirst(DATA_URLS);
+    const t = parseCSV(text); t.shift();
+    rows = t.filter(r => r.length >= 10).map(r => ({
+      name: r[0], id: r[1], country: r[2], streak: r[3],
+      wAll: r[4], uAll: r[5], active: r[6] === "Yes", wAct: r[7], uAct: r[8],
+      comps: +r[9] || 0, start: r[10] || "", end: r[11] || "",
+      hay: fold(r[0] + " " + r[1] + " " + r[2])
+    }));
+    const countries = [...new Set(rows.map(r => r.country))].sort((a, b) => a.localeCompare(b));
+    for (const c of countries) { const o = el("option", null, c); o.value = c; $("country").append(o); }
+    $("q").addEventListener("input", later);
+    $("country").addEventListener("change", render);
+    $("active").addEventListener("change", render);
+    render();
+  } catch (e) {
+    $("results").replaceChildren(el("div", "msg", "Couldn't load the data. Please try again in a moment."));
+  }
+  try {
+    const u = (await fetchFirst(UPDATED_URLS)).split("\n");
+    if (u[1]) $("updated").textContent = "Data from the WCA export of " + u[1].trim().replace(" UTC", "") + " UTC.";
+  } catch (e) {}
+}
+init();
+</script>
+</body>
+</html>

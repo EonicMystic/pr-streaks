@@ -1,0 +1,33 @@
+name: Update PR streak lists
+
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download latest WCA export
+        run: |
+          curl -L --fail --retry 3 -o "$RUNNER_TEMP/export.zip" \
+            "https://www.worldcubeassociation.org/export/results/v2/tsv"
+
+      - name: Build streak lists
+        run: python3 build_streaks.py "$RUNNER_TEMP/export.zip" data
+
+      - name: Save results and squash history
+        run: |
+          git config user.name "streak-bot"
+          git config user.email "streak-bot@users.noreply.github.com"
+          git checkout --orphan fresh
+          git add -A
+          git commit -m "Update streaks $(date -u +%F)"
+          git push --force origin fresh:main
