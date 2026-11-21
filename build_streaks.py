@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build top-500 'longest streak of competitions with a PR' lists from the WCA results export.
 
-Usage: python3 build_streaks.py <WCA_export_tsv.zip | folder_with_tsvs> <output_dir>
+Usage: python3 build_streaks.py <WCA_export_tsv.zip | folder_with_tsvs> <output_dir> [history_dir]
 """
 import csv, datetime, glob, json, os, sys, tempfile, zipfile
 from bisect import bisect_left, bisect_right
@@ -14,8 +14,6 @@ LIMITS = {'top_world_all.csv': 250, 'top_world_active.csv': 100,
 SNAP_MIN = 30      # each daily snapshot remembers every ACTIVE streak of at least this length
 WINDOW_DAYS = 7    # the Gained and Lost pages look back this many days
 COUNTRY_MIN = 40   # the by-country pages list every non-US streak of at least this length
-SEARCH_MIN = 5     # the public search page lists everyone with a streak of at least this length
-LOOKUP_MIN = 15    # the name look-up file lists everyone with a streak of at least this length (kept small: Google Sheets refuses IMPORTDATA files over ~1 MB)
 os.makedirs(out_dir, exist_ok=True)
 
 tmp = None
@@ -147,7 +145,7 @@ except Exception:
 today = (stamp[:10] or datetime.date.today().isoformat())
 today_d = datetime.date.fromisoformat(today)
 
-hist_dir = os.path.join(out_dir, 'history')
+hist_dir = sys.argv[3] if len(sys.argv) > 3 else os.path.join(out_dir, 'history')
 os.makedirs(hist_dir, exist_ok=True)
 now_active = {r['wca_id']: r for r in results if r['active']}
 
@@ -231,39 +229,12 @@ with open(os.path.join(out_dir, 'country_summary.csv'), 'w', newline='', encodin
     rows_.sort(key=lambda x: (-x[1], -x[3], x[0]))
     w.writerows(rows_)
 
-# ---------- name look-up file (slim, so Google Sheets can import it) ----------
-with open(os.path.join(out_dir, 'lookup.csv'), 'w', newline='', encoding='utf-8') as f:
+# ---------- every competitor with at least one PR comp, for the website ----------
+with open(os.path.join(out_dir, 'people.csv'), 'w', newline='', encoding='utf-8') as f:
     w = csv.writer(f)
-    w.writerow(['Name', 'WCA ID', 'Country', 'Best streak', 'World all-time rank', 'USA all-time rank',
-                'Active', 'World active rank', 'USA active rank'])
-    for r in sorted(results, key=lambda r: (-r['streak'], r['name'])):
-        if r['streak'] < LOOKUP_MIN:
-            break
-        is_us = r['country'] == 'USA'
-        w.writerow([r['name'], r['wca_id'], r['country'], r['streak'],
-                    rank_of('world_all', r['streak']),
-                    rank_of('usa_all', r['streak']) if is_us else NA,
-                    'Yes' if r['active'] else 'No',
-                    rank_of('world_active', r['streak']) if r['active'] else NA,
-                    rank_of('usa_active', r['streak']) if (r['active'] and is_us) else NA])
-
-# ---------- bigger file for the search web page (a web page has no 1 MB limit) ----------
-with open(os.path.join(out_dir, 'search.csv'), 'w', newline='', encoding='utf-8') as f:
-    w = csv.writer(f)
-    w.writerow(['Name', 'WCA ID', 'Country', 'Best streak', 'World all-time rank', 'USA all-time rank',
-                'Active', 'World active rank', 'USA active rank', 'Comps in last 12 months',
-                'Streak start', 'Streak end'])
-    for r in sorted(results, key=lambda r: (-r['streak'], r['name'])):
-        if r['streak'] < SEARCH_MIN:
-            break
-        is_us = r['country'] == 'USA'
-        w.writerow([r['name'], r['wca_id'], r['country'], r['streak'],
-                    rank_of('world_all', r['streak']),
-                    rank_of('usa_all', r['streak']) if is_us else NA,
-                    'Yes' if r['active'] else 'No',
-                    rank_of('world_active', r['streak']) if r['active'] else NA,
-                    rank_of('usa_active', r['streak']) if (r['active'] and is_us) else NA,
-                    r['recent'], r['start'], '——' if r['active'] else r['end']])
+    w.writerow(['Name', 'WCA ID', 'Country', 'Streak', 'Active'])
+    for r in results:
+        w.writerow([r['name'], r['wca_id'], r['country'], r['streak'], 1 if r['active'] else 0])
 
 gained, lost = [], []
 if prev:
