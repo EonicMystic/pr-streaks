@@ -96,46 +96,49 @@ for pid, comps in att.items():
             cur = 0
     if best:
         name, country = people.get(pid, (pid, ''))
-        active = (bi == len(ordered) - 1)
+        still = (bi == len(ordered) - 1)            # the longest streak is still running
         recent = sum(1 for c in ordered if comp_date[c] > CUTOFF)
-        broke = comp_name[ordered[bi + 1]] if not active else ''
+        broke = comp_name[ordered[bi + 1]] if not still else ''
         results.append(dict(wca_id=pid, name=name, country=country, streak=best,
-                            start=comp_name[bs], end=comp_name[be], active=active,
+                            start=comp_name[bs], end=comp_name[be], active=cur > 0, still=still,
+                            run=cur, run_start=comp_name[cs] if cur > 0 else '',
                             total_comps=len(ordered), last_comp=comp_name[ordered[-1]], recent=recent,
-                            broke_at=broke))
+                            broke_at=broke, current=cur))
 
-def ranked(subset):
-    subset = sorted(subset, key=lambda r: (-r['streak'], r['name']))
+def ranked(subset, fld='streak'):
+    subset = sorted(subset, key=lambda r: (-r[fld], r['name']))
     out = []; rank = 0
     for i, r in enumerate(subset):
-        if i == 0 or r['streak'] != subset[i-1]['streak']:
+        if i == 0 or r[fld] != subset[i-1][fld]:
             rank = i + 1                    # ties share the best rank
         out.append((rank, r))
     return out
 
-def write_list(fname, subset, show_active=True, show_pace=False):
+def write_list(fname, subset, show_active=True, show_pace=False, use_run=False):
     limit = LIMITS[fname]
-    ties = Counter(r['streak'] for r in subset)
+    fld = 'run' if use_run else 'streak'
+    ties = Counter(r[fld] for r in subset)
     header = ['Rank', 'Streak', 'Name', 'WCA ID', 'Country']
-    if show_active: header.append('Active')
+    if show_active: header.append('Still running')
     header += ['Streak start', 'Streak end']
     if show_pace: header += ['Comps in last 12 months', 'Comps per month']
     with open(os.path.join(out_dir, fname), 'w', newline='', encoding='utf-8') as f:
         w = csv.writer(f)
         w.writerow(header)
-        for rank, r in ranked(subset):
+        for rank, r in ranked(subset, fld):
             if rank > limit: break
-            row = [f"T-{rank}" if ties[r['streak']] > 1 else rank, r['streak'], r['name'], r['wca_id'], r['country']]
-            if show_active: row.append('Yes' if r['active'] else 'No')
-            row += [r['start'], '——' if r['active'] else r['end']]
+            row = [f"T-{rank}" if ties[r[fld]] > 1 else rank, r[fld], r['name'], r['wca_id'], r['country']]
+            if show_active: row.append('Yes' if r['still'] else 'No')
+            if use_run: row += [r['run_start'], '——']
+            else: row += [r['start'], '——' if r['still'] else r['end']]
             if show_pace: row += [r['recent'], f"{r['recent'] / 12:.1f}"]
             w.writerow(row)
 
 usa = lambda r: r['country'] == 'USA'
 write_list('top_world_all.csv', results)
-write_list('top_world_active.csv', [r for r in results if r['active']], show_active=False, show_pace=True)
+write_list('top_world_active.csv', [r for r in results if r['active']], show_active=False, show_pace=True, use_run=True)
 write_list('top_usa_all.csv', [r for r in results if usa(r)])
-write_list('top_usa_active.csv', [r for r in results if r['active'] and usa(r)], show_active=False, show_pace=True)
+write_list('top_usa_active.csv', [r for r in results if r['active'] and usa(r)], show_active=False, show_pace=True, use_run=True)
 
 # ---------- what changed over the last 7 days ----------
 try:
@@ -181,9 +184,9 @@ since = base_date.isoformat() if base_date else ''
 with open(os.path.join(hist_dir, f'state_{today}.csv'), 'w', newline='', encoding='utf-8') as f:
     w = csv.writer(f)
     w.writerow(['wca_id', 'name', 'country', 'streak'])
-    for k, r in sorted(now_active.items(), key=lambda kv: -kv[1]['streak']):
-        if r['streak'] >= SNAP_MIN:
-            w.writerow([k, r['name'], r['country'], r['streak']])
+    for k, r in sorted(now_active.items(), key=lambda kv: -kv[1]['run']):
+        if r['run'] >= SNAP_MIN:
+            w.writerow([k, r['name'], r['country'], r['run']])
 for d, p in snaps.items():
     if d < today_d - datetime.timedelta(days=10):
         os.remove(p)
@@ -191,9 +194,9 @@ for d, p in snaps.items():
 # sorted streak values for each board, to look up "what rank is a streak of N?"
 boards = {
     'world_all':    sorted(r['streak'] for r in results),
-    'world_active': sorted(r['streak'] for r in results if r['active']),
+    'world_active': sorted(r['run'] for r in results if r['active']),
     'usa_all':      sorted(r['streak'] for r in results if usa(r)),
-    'usa_active':   sorted(r['streak'] for r in results if r['active'] and usa(r)),
+    'usa_active':   sorted(r['run'] for r in results if r['active'] and usa(r)),
 }
 def rank_of(board, value):
     arr = boards[board]
@@ -210,21 +213,21 @@ for r in results:
         by_country[r['country']].append(r)
 with open(os.path.join(out_dir, 'countries.csv'), 'w', newline='', encoding='utf-8') as f:
     w = csv.writer(f)
-    w.writerow(['Country', 'Streak', 'Name', 'WCA ID', 'Active', 'World all-time rank', 'World active rank',
+    w.writerow(['Country', 'Streak', 'Name', 'WCA ID', 'Still running', 'World all-time rank', 'World active rank',
                 'Comps in last 12 months', 'Streak start', 'Streak end'])
     for country in sorted(by_country):
         for r in sorted(by_country[country], key=lambda r: (-r['streak'], r['name'])):
-            w.writerow([country, r['streak'], r['name'], r['wca_id'], 'Yes' if r['active'] else 'No',
+            w.writerow([country, r['streak'], r['name'], r['wca_id'], 'Yes' if r['still'] else 'No',
                         rank_of('world_all', r['streak']),
-                        rank_of('world_active', r['streak']) if r['active'] else NA,
-                        r['recent'], r['start'], '——' if r['active'] else r['end']])
+                        rank_of('world_active', r['run']) if r['still'] else NA,
+                        r['recent'], r['start'], '——' if r['still'] else r['end']])
 with open(os.path.join(out_dir, 'country_summary.csv'), 'w', newline='', encoding='utf-8') as f:
     w = csv.writer(f)
-    w.writerow(['Country', f'People with a streak of {COUNTRY_MIN}+', f'Active streaks of {COUNTRY_MIN}+',
-                'Best streak', 'Best active streak'])
+    w.writerow(['Country', f'People with a streak of {COUNTRY_MIN}+', f'Streaks of {COUNTRY_MIN}+ still running',
+                'Best streak', 'Best streak still running'])
     rows_ = []
     for country, rs in by_country.items():
-        act = [r['streak'] for r in rs if r['active']]
+        act = [r['streak'] for r in rs if r['still']]
         rows_.append([country, len(rs), len(act), max(r['streak'] for r in rs), max(act) if act else NA])
     rows_.sort(key=lambda x: (-x[1], -x[3], x[0]))
     w.writerows(rows_)
@@ -232,41 +235,41 @@ with open(os.path.join(out_dir, 'country_summary.csv'), 'w', newline='', encodin
 # ---------- every competitor with at least one PR comp, for the website ----------
 with open(os.path.join(out_dir, 'people.csv'), 'w', newline='', encoding='utf-8') as f:
     w = csv.writer(f)
-    w.writerow(['Name', 'WCA ID', 'Country', 'Streak', 'Active'])
+    w.writerow(['Name', 'WCA ID', 'Country', 'Streak', 'Active', 'Current'])
     for r in results:
-        w.writerow([r['name'], r['wca_id'], r['country'], r['streak'], 1 if r['active'] else 0])
+        w.writerow([r['name'], r['wca_id'], r['country'], r['streak'], 1 if r['still'] else 0, r['run']])
 
 # ---------- extra detail for longer streaks (loaded by the site only when someone opens a person) ----------
 with open(os.path.join(out_dir, 'details.csv'), 'w', newline='', encoding='utf-8') as f:
     w = csv.writer(f)
-    w.writerow(['WCA ID', 'Streak start', 'Streak end', 'Broke at', 'Comps in last 12 months'])
+    w.writerow(['WCA ID', 'Streak start', 'Streak end', 'Broke at', 'Comps in last 12 months', 'Current run start'])
     for r in results:
         if r['streak'] >= 3:
-            w.writerow([r['wca_id'], r['start'], r['end'], r['broke_at'], r['recent']])
+            w.writerow([r['wca_id'], r['start'], r['end'], r['broke_at'], r['recent'], r['run_start']])
 
 gained, lost = [], []
 if prev:
     for k, r in now_active.items():
-        if r['streak'] < SNAP_MIN:
+        if r['run'] < SNAP_MIN:
             continue
         p = prev.get(k)
         if p is None:
             before, gain = 'Under 30', NA          # was below the snapshot cutoff a week ago
         else:
-            gain = r['streak'] - p['streak']
+            gain = r['run'] - p['streak']
             if gain <= 0:
                 continue
             before = p['streak']
         is_us = r['country'] == 'USA'
-        gained.append([r['name'], k, r['country'], before, r['streak'], gain,
-                       rank_of('world_active', r['streak']), rank_of('world_all', r['streak']),
-                       rank_of('usa_active', r['streak']) if is_us else NA,
+        gained.append([r['name'], k, r['country'], before, r['run'], gain,
+                       rank_of('world_active', r['run']), rank_of('world_all', r['streak']),
+                       rank_of('usa_active', r['run']) if is_us else NA,
                        rank_of('usa_all', r['streak']) if is_us else NA, since])
     for k, p in prev.items():
         r = by_id.get(k)
-        if r is not None and r['active']:
-            continue
-        final = r['streak'] if r else p['streak']      # their final streak number
+        if r is not None and r['active'] and r['run'] >= p['streak']:
+            continue                                      # still running at least as long as before
+        final = max(p['streak'], r['streak']) if r else p['streak']      # their final streak number
         is_us = p['country'] == 'USA'
         lost.append([p['name'], k, p['country'], final,
                      rank_of('world_all', final), rank_of('usa_all', final) if is_us else NA,
