@@ -49,7 +49,7 @@
   }
   .item:last-child { border-bottom: 0; }
   .item:hover { background: var(--bg); }
-  .rk { flex: 0 0 52px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .rk { flex: 0 0 64px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--muted); }
   .who { flex: 1 1 auto; min-width: 0; }
   .who .n { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .who .c { color: var(--muted); font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -236,9 +236,9 @@ function renderLookup(v) {
     for (let i = 0; i < N; i++) { let ok = true; for (const t of terms) if (!hay[i].includes(t)) { ok = false; break; } if (ok) found.push(i); }
     found.sort((a, b) => streak[b] - streak[a] || names[a].localeCompare(names[b]));
     if (!found.length) { count.textContent = ""; list.append(el("div", "msg", "No one found. Check the spelling or try the WCA ID.")); return; }
-    count.textContent = found.length > 40 ? "Showing 40 of " + found.length.toLocaleString() + " matches. Keep typing to narrow it." : found.length + (found.length === 1 ? " match" : " matches");
+    count.textContent = found.length > 40 ? "Showing 40 of " + found.length.toLocaleString() + " matches. Keep typing to narrow it." : found.length + (found.length === 1 ? " match" : " matches") + " · ranks are world all-time";
     const box = el("div", "list");
-    for (const i of found.slice(0, 40)) box.append(item("", i));
+    for (const i of found.slice(0, 40)) box.append(item(fmtRank(rankIn(cntAll, streak[i])), i));
     list.append(box);
   };
   let t; inp.addEventListener("input", () => { query = inp.value; clearTimeout(t); t = setTimeout(run, 150); });
