@@ -46,7 +46,7 @@ jobs:
           if [ "$FULL" != "true" ]; then
             ok=1
             for f in next_comps comps registrations; do
-              curl -sSL --fail --retry 4 --retry-all-errors --retry-delay 5 -o "site/data/$f.csv" "$LIVE_BASE/$f.csv" || ok=0
+              curl -sSL --fail --retry 4 --retry-delay 5 -o "site/data/$f.csv" "$LIVE_BASE/$f.csv" || ok=0
             done
             if [ "$ok" = "1" ] && [ "$(wc -l < site/data/next_comps.csv)" -gt 100 ]; then
               echo "Reused the next competitions already on the live site"
@@ -64,6 +64,7 @@ jobs:
           git rm -r -q --ignore-unmatch data
           git add history
           git diff --cached --quiet || git commit -m "Update history"
+          git pull --rebase -q origin main
           git push
 
       - uses: actions/configure-pages@v5
