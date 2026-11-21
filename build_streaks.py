@@ -236,6 +236,14 @@ with open(os.path.join(out_dir, 'people.csv'), 'w', newline='', encoding='utf-8'
     for r in results:
         w.writerow([r['name'], r['wca_id'], r['country'], r['streak'], 1 if r['active'] else 0])
 
+# ---------- extra detail for longer streaks (loaded by the site only when someone opens a person) ----------
+with open(os.path.join(out_dir, 'details.csv'), 'w', newline='', encoding='utf-8') as f:
+    w = csv.writer(f)
+    w.writerow(['WCA ID', 'Streak start', 'Streak end', 'Broke at', 'Comps in last 12 months'])
+    for r in results:
+        if r['streak'] >= 3:
+            w.writerow([r['wca_id'], r['start'], r['end'], r['broke_at'], r['recent']])
+
 gained, lost = [], []
 if prev:
     for k, r in now_active.items():
