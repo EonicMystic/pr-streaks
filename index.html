@@ -340,8 +340,10 @@ function renderMine(v) {
     v.append(box);
     loadNext().then(m => {
       for (const b of box.children) {
+        if (!m.size) return;
         const x = m.get(b.dataset.id);
-        if (x) { const c = b.querySelector(".c"); c.textContent = cty[idx(b.dataset.id)] + " · Next: " + nextText(x); c.style.whiteSpace = "normal"; }
+        const c = b.querySelector(".c"); c.style.whiteSpace = "normal";
+        c.textContent = cty[idx(b.dataset.id)] + " · Next: " + (x ? nextText(x) : "N/A");
       }
     });
   }
@@ -576,7 +578,12 @@ function renderPerson(v, i) {
   });
   loadNext().then(m => {
     if (!info.isConnected) return;
-    const x = m.get(ids[i]); if (!x) return;
+    const x = m.get(ids[i]);
+    if (!x) {
+      if (!m.size) return;   // registration data didn't load: show nothing rather than a false N/A
+      const r0 = el("div", "r"); r0.append(el("span", null, "Next comp"), el("b", null, "N/A"));
+      info.prepend(r0); return;
+    }
     const r = el("div", "r"); r.append(el("span", null, "Next comp"));
     const b = el("b"); const a2 = el("a", null, x.name);
     a2.href = "https://www.worldcubeassociation.org/competitions/" + encodeURIComponent(x.id); a2.target = "_blank"; a2.rel = "noopener"; a2.style.color = "var(--accent)";
