@@ -2,7 +2,7 @@ name: Update PR streaks
 
 on:
   schedule:
-    - cron: '30 3 * * *'
+    - cron: '7 1 * * *'
   workflow_dispatch:
     inputs:
       refresh_registrations:
