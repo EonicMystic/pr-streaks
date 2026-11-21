@@ -32,6 +32,10 @@ jobs:
           python3 build_streaks.py "$RUNNER_TEMP/export.zip" site/data history
           cp index.html site/index.html
 
+      - name: Upcoming registrations
+        continue-on-error: true
+        run: python3 fetch_registrations.py site/data
+
       - name: Save history snapshots
         run: |
           git config user.name "github-actions"
