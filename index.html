@@ -4,6 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PR Streak Rankings</title>
+<meta name="description" content="Longest streaks of consecutive competitions with a personal record, for every WCA competitor. Look up anyone, see rankings, and who is competing next.">
+<meta name="theme-color" content="#0e1116">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="PR Streaks">
+<link rel="manifest" href="data/manifest.webmanifest">
+<link rel="apple-touch-icon" href="data/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="data/icon-192.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="PR Streak Rankings">
+<meta property="og:title" content="PR Streak Rankings">
+<meta property="og:description" content="Longest streaks of consecutive competitions with a PR, for every WCA competitor. Look up anyone, see rankings, and who is competing next.">
+<meta property="og:image" content="https://eonicmystic.github.io/pr-streaks/data/icon-512.png">
+<meta name="twitter:card" content="summary">
 <style>
   :root {
     --bg: #f6f7f9; --card: #ffffff; --text: #16191d; --muted: #5d6671; --line: #e1e4e8;
@@ -116,6 +129,15 @@
   .backup h3 { margin: 0 0 4px; font-size: 1rem; }
   .backup p { margin: 0 0 10px; color: var(--muted); font-size: .85rem; }
   .backup .actions { margin-top: 10px; }
+  .faq h2 { font-size: 1.05rem; margin: 20px 0 4px; }
+  .faq p { margin: 0 0 8px; color: var(--text); font-size: .95rem; }
+  .faq a { color: var(--accent); }
+  .rep { display: inline-block; margin-top: 14px; color: var(--muted); font-size: .85rem; }
+  .rep a { color: var(--accent); }
+  .exp { background: var(--bg); border-bottom: 1px solid var(--line); }
+  .exp .item { background: none; }
+  .exp .lnk { display: block; padding: 10px 14px; font-size: .88rem; color: var(--accent); }
+  select.small { width: auto; min-width: 150px; margin: 0 0 10px; padding: 9px 12px; font-size: .92rem; }
   .note { color: var(--muted); font-size: .8rem; margin-top: 22px; }
   .note a { color: var(--accent); }
 </style>
@@ -132,7 +154,7 @@
   <p class="note">
     Next competitions come from accepted registrations as of the last update. A streak is the most consecutive competitions a person attended where they set at least one PR (matching a PR counts).
     <b>Active</b> means the streak is still running at their most recent competition. Ranks marked T- are tied.
-    This is an unofficial fan-made tool. Data comes from the
+    This is an unofficial fan-made tool. <a href="#about">How this works</a> · <a href="https://github.com/EonicMystic/pr-streaks/issues/new" target="_blank" rel="noopener">Report a problem</a>. Data comes from the
     <a href="https://www.worldcubeassociation.org/export/results" target="_blank" rel="noopener">official WCA results export</a>.
   </p>
 </div>
@@ -142,6 +164,7 @@ const PAGE = 40;
 const TABS = [
   { id: "lookup",    label: "Lookup" },
   { id: "week",      label: "This week" },
+  { id: "upcoming",  label: "Upcoming" },
   { id: "mine",      label: "My list" },
   { id: "worldAll",  label: "World all-time" },
   { id: "worldAct",  label: "World active" },
@@ -314,6 +337,88 @@ function fmtDate(d) {
   return new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 function nextText(x) { return x.name + " · " + fmtDate(x.start) + (x.city ? " · " + x.city : ""); }
+
+/* ---------- upcoming competitions ---------- */
+let upData = null, upThr = 20;
+const upOpen = new Set();
+async function loadUpcoming() {
+  if (upData) return upData;
+  const get = async f => { const r = await fetch("data/" + f, { cache: "no-cache" }); if (!r.ok) throw new Error(f); const L = (await r.text()).split("\n"); L.shift(); return L.filter(x => x).map(x => parseLine(x.replace(/\r$/, ""))); };
+  const [cs, rs] = await Promise.all([get("comps.csv"), get("registrations.csv")]);
+  const map = new Map(), list = [];
+  for (const p of cs) { const c = { id: p[0], name: p[1], start: p[2], end: p[3], city: p[4], total: 0, att: [] }; map.set(c.id, c); list.push(c); }
+  for (const p of rs) {
+    const c = map.get(p[1]); if (!c) continue;
+    c.total++;
+    const i = idx(p[0]);
+    if (i >= 0 && active[i]) c.att.push(i);
+  }
+  for (const c of list) { c.att.sort((a, b) => streak[b] - streak[a] || names[a].localeCompare(names[b])); c.top = c.att.length ? streak[c.att[0]] : 0; }
+  upData = list;
+  return list;
+}
+function todayStr() { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+function shortDate(d) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || ""); return m ? new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : ""; }
+
+function renderUpcoming(v) {
+  const sel = el("select", "small");
+  for (const t of [[1, "Any active streak"], [10, "Active streak 10+"], [20, "Active streak 20+"], [30, "Active streak 30+"], [40, "Active streak 40+"]]) {
+    const o = el("option", null, t[1]); o.value = t[0]; sel.append(o);
+  }
+  sel.value = String(upThr);
+  sel.addEventListener("change", () => { upThr = +sel.value; shown = PAGE; render(); });
+  const body = el("div");
+  v.append(sel, body);
+  body.append(el("div", "msg", "Loading…"));
+  loadUpcoming().then(list => {
+    if (!body.isConnected) return;
+    body.replaceChildren();
+    const today = todayStr();
+    const rows = list.filter(c => (c.end || c.start) >= today && c.top >= upThr);
+    body.append(el("div", "count", rows.length + (rows.length === 1 ? " competition" : " competitions") + " with a streak of " + upThr + "+ still running, from accepted registrations."));
+    if (!rows.length) { body.append(el("div", "msg", "Nothing matches. Try a lower streak.")); return; }
+    const box = el("div", "list");
+    for (const c of rows.slice(0, shown)) {
+      const k = c.att.filter(i => streak[i] >= upThr);
+      const open = upOpen.has(c.id);
+      const head = rowEl(shortDate(c.start), c.name, c.city + " · " + k.length + " active streak" + (k.length === 1 ? "" : "s") + " " + upThr + "+", String(c.top), true, () => { if (upOpen.has(c.id)) upOpen.delete(c.id); else upOpen.add(c.id); render(); });
+      box.append(head);
+      if (open) {
+        const ex = el("div", "exp");
+        for (const i of k.slice(0, 40)) ex.append(item("", i));
+        if (k.length > 40) ex.append(el("div", "count", "Showing the top 40 of " + k.length));
+        const a = el("a", "lnk", "Open this competition on the WCA site →");
+        a.href = "https://www.worldcubeassociation.org/competitions/" + encodeURIComponent(c.id); a.target = "_blank"; a.rel = "noopener";
+        ex.append(a); box.append(ex);
+      }
+    }
+    body.append(box);
+    if (rows.length > shown) {
+      const m = el("button", "more", "Show more"); m.type = "button";
+      m.addEventListener("click", () => { shown += PAGE; render(); });
+      body.append(m);
+    }
+  }).catch(() => { body.replaceChildren(el("div", "msg", "Upcoming competitions aren't available right now.")); });
+}
+
+/* ---------- about / FAQ ---------- */
+function renderAbout(v) {
+  backBtn(v);
+  const d = el("div", "faq");
+  const add = (q, a) => { d.append(el("h2", null, q)); const p = el("p"); p.innerHTML = a; d.append(p); };
+  d.append(el("h1", null, "How this works"));
+  add("What is a PR streak?", "The number of competitions in a row that a person attended where they set a personal record (PR) in at least one event. Competitions are taken in date order, and one competition without a PR ends the run.");
+  add("What counts as a PR?", "A new best single or average in any event, compared with everything that person did before that competition. Matching your previous best counts too.");
+  add("What does the number on someone's page mean?", "It's their <b>longest ever</b> streak, not necessarily their current one. <b>Active</b> means that longest streak is still running as of their most recent competition. <b>Ended</b> means they've had a competition without a PR since.");
+  add("How are ranks worked out?", "Everyone is ranked by streak length. People with the same streak share the best rank and show it as T- (for example T-196). Country ranks only compare people from the same country. Active ranks only compare people whose streak is still running. \"Longer than\" is the share of all competitors whose longest streak is shorter.");
+  add("Why can't I find someone?", "People with no PR competitions, or who haven't competed yet, aren't listed. New results also take time to appear: the site rebuilds every night from the official WCA results export, which can lag a competition by a day or more.");
+  add("What is the This week tab?", "Streaks of 30 or more that grew or ended since the comparison date shown on that tab. It fills in once the site has a week of history.");
+  add("How does Upcoming and Next comp work?", "They use accepted registrations on the WCA site, refreshed nightly. Only people with a WCA ID appear, and pending or waitlisted registrations don't count. \"Next comp\" is the earliest upcoming competition someone is accepted for. Upcoming only counts people whose streak is still active, since only those streaks are still on the line.");
+  add("Where is my My list saved?", "In this browser only. It won't follow you to another device or to the Home Screen version of the site. Use Copy and Import at the bottom of My list to move or back it up.");
+  add("Where does the data come from?", "The official <a href=\"https://www.worldcubeassociation.org/export/results\" target=\"_blank\" rel=\"noopener\">WCA results export</a>. This is an unofficial fan-made tool and isn't affiliated with the WCA. The code is on <a href=\"https://github.com/EonicMystic/pr-streaks\" target=\"_blank\" rel=\"noopener\">GitHub</a>.");
+  add("Something looks wrong", "Open a <a href=\"https://github.com/EonicMystic/pr-streaks/issues/new\" target=\"_blank\" rel=\"noopener\">GitHub issue</a>, or use the Report a problem link on a person's page. It needs a free GitHub account.");
+  v.append(d);
+}
 
 /* ---------- watchlist (saved in this browser) ---------- */
 let watchMem = null;
@@ -621,6 +726,10 @@ function renderPerson(v, i) {
   const wt = el("button", isWatched(ids[i]) ? "on" : null, isWatched(ids[i]) ? "★ Watching" : "☆ Watch"); wt.type = "button";
   wt.addEventListener("click", () => { const on = toggleWatch(ids[i]); wt.textContent = on ? "★ Watching" : "☆ Watch"; wt.className = on ? "on" : ""; });
   acts.append(wt, sh, cd, cp); d.append(acts);
+  const rep = el("div", "rep"); const ra = el("a", null, "Report a problem with this page");
+  ra.href = "https://github.com/EonicMystic/pr-streaks/issues/new?title=" + encodeURIComponent("Problem with " + names[i] + " (" + ids[i] + ")") +
+    "&body=" + encodeURIComponent("Page: " + personUrl(i) + "\n\nWhat looks wrong?\n");
+  ra.target = "_blank"; ra.rel = "noopener"; rep.append(ra); d.append(rep);
   v.append(d);
 }
 
@@ -677,6 +786,7 @@ function render() {
     $("tabs").style.display = "none";
     if (i >= 0) { renderPerson(v, i); window.scrollTo(0, 0); return; }
   }
+  if (location.hash === "#about") { $("tabs").style.display = "none"; renderAbout(v); window.scrollTo(0, 0); return; }
   m = /^#c=([^,]+)(?:,(.+))?$/.exec(location.hash);
   if (m) {
     $("tabs").style.display = "none";
@@ -684,7 +794,7 @@ function render() {
     window.scrollTo(0, 0); return;
   }
   $("tabs").style.display = ""; renderTabs();
-  if (tab === "lookup") renderLookup(v); else if (tab === "week") renderWeek(v); else if (tab === "mine") renderMine(v); else renderBoard(v);
+  if (tab === "lookup") renderLookup(v); else if (tab === "week") renderWeek(v); else if (tab === "mine") renderMine(v); else if (tab === "upcoming") renderUpcoming(v); else renderBoard(v);
 }
 
 window.addEventListener("hashchange", render);
