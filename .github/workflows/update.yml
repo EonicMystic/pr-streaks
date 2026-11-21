@@ -41,21 +41,33 @@ jobs:
         continue-on-error: true
         env:
           FULL: ${{ github.event_name != 'workflow_dispatch' || inputs.refresh_registrations }}
-          LIVE_BASE: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data
+          GH_TOKEN: ${{ github.token }}
         run: |
+          mkdir -p site/data
           if [ "$FULL" != "true" ]; then
-            ok=1
-            for f in next_comps comps registrations; do
-              curl -sSL --fail --retry 4 --retry-delay 5 -o "site/data/$f.csv" "$LIVE_BASE/$f.csv" || ok=0
-            done
+            ok=0
+            if git fetch -q --depth 1 origin registrations-cache; then
+              ok=1
+              for f in next_comps comps registrations; do
+                git show "FETCH_HEAD:$f.csv" > "site/data/$f.csv" || ok=0
+              done
+            fi
             if [ "$ok" = "1" ] && [ "$(wc -l < site/data/next_comps.csv)" -gt 100 ]; then
-              echo "Reused the next competitions already on the live site"
+              echo "Reused the saved next competitions (from the registrations-cache branch)"
               exit 0
             fi
             rm -f site/data/next_comps.csv site/data/comps.csv site/data/registrations.csv
-            echo "No usable live copy found, doing a full refresh"
+            echo "No saved copy found, doing a full refresh"
           fi
           python3 fetch_registrations.py site/data
+          if [ "$(wc -l < site/data/next_comps.csv 2>/dev/null || echo 0)" -gt 100 ]; then
+            d=$(mktemp -d)
+            cp site/data/next_comps.csv site/data/comps.csv site/data/registrations.csv "$d/"
+            (cd "$d" && git init -q -b cache && git config user.name github-actions && git config user.email github-actions@users.noreply.github.com \
+              && git add . && git commit -qm "Saved next competitions" \
+              && git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" cache:registrations-cache) \
+              && echo "Saved a copy for quick runs" || echo "Could not save a copy for quick runs"
+          fi
 
       - name: Save history snapshots
         run: |
