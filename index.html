@@ -218,10 +218,22 @@ function parseLine(line) {
   return out;
 }
 
+async function fetchRetry(url) {
+  let last;
+  for (let k = 0; k < 4; k++) {
+    try {
+      const r = await fetch(url, { cache: k === 0 ? "no-cache" : "reload" });
+      if (r.ok) return await r.text();
+      last = new Error("the server answered " + r.status);
+      if (r.status === 404) break;                    // not going to appear by waiting
+    } catch (e) { last = e; }
+    await new Promise(res => setTimeout(res, 1200 * (k + 1)));
+  }
+  throw last || new Error("unknown error");
+}
+
 async function load() {
-  const r = await fetch("data/people.csv", { cache: "no-cache" });
-  if (!r.ok) throw new Error(r.status);
-  const text = await r.text();
+  const text = await fetchRetry("data/people.csv");
   const cap = Math.ceil(text.length / 38) + 1000;          // generous upper bound on the row count
   streak = new Uint8Array(cap); active = new Uint8Array(cap); ctyIdx = new Uint16Array(cap); cur = new Uint8Array(cap);
   buckets = Array.from({ length: MAXS + 1 }, () => []);
@@ -961,15 +973,24 @@ function render() {
 
 window.addEventListener("hashchange", render);
 
-(async function init() {
-  $("view").append(el("div", "msg", "Loading every competitor… this takes a few seconds."));
-  try { await load(); } catch (e) { $("view").replaceChildren(el("div", "msg", "Couldn't load the data. Please try again in a moment.")); return; }
+async function boot() {
+  const v = $("view");
+  v.replaceChildren(el("div", "msg", "Loading every competitor… this takes a few seconds."));
+  try { await load(); } catch (e) {
+    const box = el("div", "msg");
+    box.append(el("div", null, "Couldn't load the data."), el("div", "s", String((e && e.message) || e)));
+    const b = el("button", "more", "Try again"); b.type = "button";
+    b.addEventListener("click", () => { names = []; ids = []; cty = []; hay = null; countryList = []; cIndex = new Map(); ccAll = []; ccAct = []; totalAll = 0; totalAct = 0; idMap = null; boot(); });
+    v.replaceChildren(box, b);
+    return;
+  }
   render();
   try {
     const t = (await (await fetch("data/updated.csv", { cache: "no-cache" })).text()).split("\n")[1];
     if (t) $("updated").textContent = "Data from the WCA export of " + t.trim().replace(" UTC", "") + " UTC.";
   } catch (e) {}
-})();
+}
+boot();
 </script>
 </body>
 </html>
