@@ -62,6 +62,8 @@
   }
   .item:last-child { border-bottom: 0; }
   .item:hover { background: var(--bg); }
+  .when .rk { flex: 0 0 74px; font-size: .86rem; line-height: 1.2; }
+  .count.sec { margin-top: 14px; font-weight: 600; color: var(--fg, inherit); }
   .rk { flex: 0 0 64px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--muted); }
   .who { flex: 1 1 auto; min-width: 0; }
   .who .n { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -177,7 +179,7 @@ const PAGE = 40;
 const TABS = [
   { id: "lookup",    label: "Lookup" },
   { id: "week",      label: "This week" },
-  { id: "upcoming",  label: "Upcoming" },
+  { id: "upcoming",  label: "Competitions" },
   { id: "mine",      label: "My list" },
   { id: "proj",      label: "Projections" },
   { id: "worldAll",  label: "World all-time" },
@@ -403,13 +405,11 @@ function todayStr() { const d = new Date(); return d.getFullYear() + "-" + Strin
 function shortDate(d) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || ""); return m ? new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : ""; }
 
 function dayNum(d) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || ""); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) / 86400000 : NaN; }
-function whenText(c) {
+function rangeText(c) {
   const e = c.end && c.end !== c.start ? c.end : "";
   if (!e) return shortDate(c.start);
-  const n = dayNum(e) - dayNum(c.start) + 1;
   const sm = c.start.slice(5, 7) === e.slice(5, 7);
-  const rng = sm ? shortDate(c.start) + "\u2013" + String(+e.slice(8, 10)) : shortDate(c.start) + " \u2013 " + shortDate(e);
-  return (n > 1 ? n + " days \u00b7 " : "") + rng;
+  return sm ? shortDate(c.start) + "\u2013" + String(+e.slice(8, 10)) : shortDate(c.start) + "\u2013" + shortDate(e);
 }
 function renderUpcoming(v) {
   const sel = el("select", "small");
@@ -426,28 +426,37 @@ function renderUpcoming(v) {
     body.replaceChildren();
     const today = todayStr();
     const rows = list.filter(c => (c.end || c.start) >= today && c.top >= upThr);
+    rows.sort((x, y) => x.start.localeCompare(y.start) || y.top - x.top);
+    const now = rows.filter(c => c.start <= today), soon = rows.filter(c => c.start > today);
     body.append(el("div", "count", rows.length + (rows.length === 1 ? " competition" : " competitions") + " with a streak of " + upThr + "+ still running, from accepted registrations."));
     if (!rows.length) { body.append(el("div", "msg", "Nothing matches. Try a lower streak.")); return; }
-    const box = el("div", "list");
-    for (const c of rows.slice(0, shown)) {
+    const row = (box, c) => {
       const k = c.att.filter(i => cur[i] >= upThr);
       const open = upOpen.has(c.id);
-      const head = rowEl(shortDate(c.start), c.name, (c.start <= today ? "Happening now · " : "") + whenText(c) + (c.city ? " · " + c.city : "") + " · " + k.length + " active streak" + (k.length === 1 ? "" : "s") + " " + upThr + "+", String(c.top), true, () => { if (upOpen.has(c.id)) upOpen.delete(c.id); else upOpen.add(c.id); render(); });
+      const head = rowEl(rangeText(c), c.name, (c.city ? c.city + " \u00b7 " : "") + k.length + " active streak" + (k.length === 1 ? "" : "s") + " " + upThr + "+", String(c.top), true, () => { if (upOpen.has(c.id)) upOpen.delete(c.id); else upOpen.add(c.id); render(); });
+      head.classList.add("when");
       box.append(head);
       if (open) {
         const ex = el("div", "exp");
         for (const i of k.slice(0, 40)) ex.append(item("", i, null, cur[i]));
         if (k.length > 40) ex.append(el("div", "count", "Showing the top 40 of " + k.length));
-        const a = el("a", "lnk", "Open this competition on the WCA site →");
+        const a = el("a", "lnk", "Open this competition on the WCA site \u2192");
         a.href = "https://www.worldcubeassociation.org/competitions/" + encodeURIComponent(c.id); a.target = "_blank"; a.rel = "noopener";
         ex.append(a); box.append(ex);
       }
+    };
+    if (now.length) {
+      body.append(el("div", "count sec", "Ongoing now \u00b7 " + now.length));
+      const bx = el("div", "list"); for (const c of now) row(bx, c); body.append(bx);
     }
-    body.append(box);
-    if (rows.length > shown) {
-      const m = el("button", "more", "Show more"); m.type = "button";
-      m.addEventListener("click", () => { shown += PAGE; render(); });
-      body.append(m);
+    if (soon.length) {
+      body.append(el("div", "count sec", "Upcoming \u00b7 " + soon.length));
+      const bx = el("div", "list"); for (const c of soon.slice(0, shown)) row(bx, c); body.append(bx);
+      if (soon.length > shown) {
+        const m = el("button", "more", "Show more"); m.type = "button";
+        m.addEventListener("click", () => { shown += PAGE; render(); });
+        body.append(m);
+      }
     }
   }).catch(() => { body.replaceChildren(el("div", "msg", "Upcoming competitions aren't available right now.")); });
 }
@@ -581,7 +590,7 @@ function renderAbout(v) {
   add("Why can't I find someone?", "People with no PR competitions, or who haven't competed yet, aren't listed. New results also take time to appear: the site rebuilds every night from the official WCA results export, which can lag a competition by a day or more.");
   add("What is the Projections tab?", "It shows where a streak would rank, and what streak a rank takes, using today\'s numbers. Pick a person to start from their own streak. Other people keep competing, so real ranks will shift.");
   add("What is the This week tab?", "Current streaks of 30 or more that grew or ended since the comparison date shown on that tab. It fills in once the site has a week of history.");
-  add("How does Upcoming and Next comp work?", "They use accepted registrations on the WCA site, refreshed nightly. Only people with a WCA ID appear, and pending or waitlisted registrations don't count. \"Next comp\" is the earliest upcoming competition someone is accepted for. Upcoming only counts people with an active current streak, since only those streaks are still on the line.");
+  add("How does Competitions and Next comp work?", "They use accepted registrations on the WCA site, refreshed nightly. Only people with a WCA ID appear, and pending or waitlisted registrations don't count. \"Next comp\" is the earliest upcoming competition someone is accepted for. The Competitions tab only counts people with an active current streak, since only those streaks are still on the line.");
   add("Where is my My list saved?", "In this browser only. It won't follow you to another device or to the Home Screen version of the site. Use Copy and Import at the bottom of My list to move or back it up.");
   add("Where does the data come from?", "The official <a href=\"https://www.worldcubeassociation.org/export/results\" target=\"_blank\" rel=\"noopener\">WCA results export</a>. This is an unofficial fan-made tool and isn't affiliated with the WCA. The code is on <a href=\"https://github.com/EonicMystic/pr-streaks\" target=\"_blank\" rel=\"noopener\">GitHub</a>.");
   add("Something looks wrong", "Open a <a href=\"https://github.com/EonicMystic/pr-streaks/issues/new\" target=\"_blank\" rel=\"noopener\">GitHub issue</a>, or use the Report a problem link on a person's page. It needs a free GitHub account.");
