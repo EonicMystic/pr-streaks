@@ -402,6 +402,15 @@ async function loadUpcoming() {
 function todayStr() { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
 function shortDate(d) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || ""); return m ? new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : ""; }
 
+function dayNum(d) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || ""); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) / 86400000 : NaN; }
+function whenText(c) {
+  const e = c.end && c.end !== c.start ? c.end : "";
+  if (!e) return shortDate(c.start);
+  const n = dayNum(e) - dayNum(c.start) + 1;
+  const sm = c.start.slice(5, 7) === e.slice(5, 7);
+  const rng = sm ? shortDate(c.start) + "\u2013" + String(+e.slice(8, 10)) : shortDate(c.start) + " \u2013 " + shortDate(e);
+  return (n > 1 ? n + " days \u00b7 " : "") + rng;
+}
 function renderUpcoming(v) {
   const sel = el("select", "small");
   for (const t of [[1, "Any active streak"], [10, "Active streak 10+"], [20, "Active streak 20+"], [30, "Active streak 30+"], [40, "Active streak 40+"]]) {
@@ -423,7 +432,7 @@ function renderUpcoming(v) {
     for (const c of rows.slice(0, shown)) {
       const k = c.att.filter(i => cur[i] >= upThr);
       const open = upOpen.has(c.id);
-      const head = rowEl(shortDate(c.start), c.name, c.city + " · " + k.length + " active streak" + (k.length === 1 ? "" : "s") + " " + upThr + "+", String(c.top), true, () => { if (upOpen.has(c.id)) upOpen.delete(c.id); else upOpen.add(c.id); render(); });
+      const head = rowEl(shortDate(c.start), c.name, (c.start <= today ? "Happening now · " : "") + whenText(c) + (c.city ? " · " + c.city : "") + " · " + k.length + " active streak" + (k.length === 1 ? "" : "s") + " " + upThr + "+", String(c.top), true, () => { if (upOpen.has(c.id)) upOpen.delete(c.id); else upOpen.add(c.id); render(); });
       box.append(head);
       if (open) {
         const ex = el("div", "exp");
