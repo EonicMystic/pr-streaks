@@ -375,15 +375,19 @@ function renderLookup(v) {
 }
 
 /* ---------- next competition (from registrations) ---------- */
-let nextMap = null;
-async function loadNext() {
-  if (nextMap) return nextMap;
+let nextMap = null, nextP = null, nextDone = false;
+function loadNext() {
+  if (nextP) return nextP;
   nextMap = new Map();
-  try {
-    const r = await fetch("data/next_comps.csv", { cache: "no-cache" });
-    if (r.ok) { const L = (await r.text()).split("\n"); L.shift(); for (const ln of L) { if (!ln) continue; const p = parseLine(ln.replace(/\r$/, "")); nextMap.set(p[0], { name: p[1], id: p[2], start: p[3], end: p[4], city: p[5] }); } }
-  } catch (e) {}
-  return nextMap;
+  nextP = (async () => {
+    try {
+      const r = await fetch("data/next_comps.csv", { cache: "no-cache" });
+      if (r.ok) { const L = (await r.text()).split("\n"); L.shift(); for (const ln of L) { if (!ln) continue; const p = parseLine(ln.replace(/\r$/, "")); nextMap.set(p[0], { name: p[1], id: p[2], start: p[3], end: p[4], city: p[5] }); } }
+    } catch (e) {}
+    nextDone = true;
+    return nextMap;
+  })();
+  return nextP;
 }
 function fmtDate(d) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || ""); if (!m) return d || "";
@@ -662,13 +666,28 @@ async function getStamp() {
   try { const t = (await (await fetch("data/updated.csv", { cache: "no-cache" })).text()).split("\n")[1]; if (t) dataStamp = t.trim().replace(" UTC", ""); } catch (e) {}
   return dataStamp;
 }
+let mineSort = store("mineSort") === "next" ? "next" : "streak";
 function renderMine(v) {
   const w = getWatch().map(idx).filter(i => i >= 0);
   if (!w.length) {
     v.append(el("div", "msg", "No one on your list yet. Open anyone's page and tap Watch to add them."));
   } else {
-    w.sort((a, b) => cur[b] - cur[a] || streak[b] - streak[a] || names[a].localeCompare(names[b]));
-    v.append(el("div", "count", w.length + (w.length === 1 ? " person" : " people") + " · showing current streaks, ranked among world active"));
+    const sortSel = el("select", "small");
+    for (const t of [["streak", "Sort: current streak"], ["next", "Sort: next competition"]]) { const o = el("option", null, t[1]); o.value = t[0]; sortSel.append(o); }
+    sortSel.value = mineSort;
+    sortSel.addEventListener("change", () => { mineSort = sortSel.value; store("mineSort", mineSort); render(); });
+    v.append(sortSel);
+    if (mineSort === "next" && !nextDone) {
+      v.append(el("div", "msg", "Loading…"));
+      loadNext().then(() => { if (sortSel.isConnected) render(); });
+      return;
+    }
+    const byStreak = (a, b) => cur[b] - cur[a] || streak[b] - streak[a] || names[a].localeCompare(names[b]);
+    if (mineSort === "next") {
+      const nx = i => nextMap.get(ids[i]);
+      w.sort((a, b) => { const x = nx(a), y = nx(b); if (x && y) return x.start.localeCompare(y.start) || (x.end || "").localeCompare(y.end || "") || byStreak(a, b); return x ? -1 : y ? 1 : byStreak(a, b); });
+    } else w.sort(byStreak);
+    v.append(el("div", "count", w.length + (w.length === 1 ? " person" : " people") + (mineSort === "next" ? " · soonest next competition first; people without one are last" : " · showing current streaks, ranked among world active")));
     const box = el("div", "list");
     for (const i of w) { const b = item(cur[i] > 0 ? fmtRank(rankIn(cntAct, cur[i])) : "—", i, null, cur[i]); if (!cur[i]) b.querySelector(".dot").remove(); b.querySelector(".c").textContent = cty[i] + " · Longest " + streak[i]; b.dataset.id = ids[i]; box.append(b); }
     v.append(box);
