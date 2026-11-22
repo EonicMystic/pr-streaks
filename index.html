@@ -128,6 +128,9 @@
   .chg.up { color: var(--good); }
   .chg.down { color: #d1242f; }
   .chg.new { color: var(--accent); }
+  .allnext { padding: 2px 0 8px 94px; font-size: .88rem; }
+  .allnext div { padding: 5px 0; border-top: 1px solid var(--line); }
+  .tg { background: none; border: 0; color: var(--accent); font: inherit; font-size: .85rem; cursor: pointer; padding: 0 0 0 8px; }
   .tl { margin-top: 14px; }
   .dots i[data-k] { position: relative; cursor: pointer; }
   .dots i[data-k]::after { content: ""; position: absolute; inset: -4px; }
@@ -413,7 +416,7 @@ async function loadStreakDetail(id) {
 }
 
 /* ---------- upcoming competitions ---------- */
-let upData = null, upThr = 20;
+let upData = null, upThr = 20, upReg = new Map(), upMine = store("upMine") === "1";
 const upOpen = new Set();
 async function loadUpcoming() {
   if (upData) return upData;
@@ -424,6 +427,8 @@ async function loadUpcoming() {
   for (const p of rs) {
     const c = map.get(p[1]); if (!c) continue;
     c.total++;
+    if (!upReg.has(p[0])) upReg.set(p[0], []);
+    upReg.get(p[0]).push(c);
     const i = idx(p[0]);
     if (i >= 0 && cur[i] > 0) c.att.push(i);
   }
@@ -457,7 +462,12 @@ function renderUpcoming(v) {
   sel.addEventListener("change", () => { upThr = +sel.value; shown = PAGE; render(); });
   const csel = el("select", "small"); csel.style.display = "none";
   csel.addEventListener("change", () => { upCountry = csel.value; store("upCountry", upCountry); shown = PAGE; render(); });
-  const bar = el("div", "filters"); bar.append(sel, csel);
+  const msel = el("select", "small");
+  for (const t of [["0", "All competitions"], ["1", "My list only"]]) { const o = el("option", null, t[1]); o.value = t[0]; msel.append(o); }
+  msel.value = upMine ? "1" : "0";
+  msel.addEventListener("change", () => { upMine = msel.value === "1"; store("upMine", upMine ? "1" : "0"); shown = PAGE; render(); });
+  if (upMine) sel.style.display = "none";
+  const bar = el("div", "filters"); bar.append(msel, sel, csel);
   const body = el("div");
   v.append(bar, body);
   body.append(el("div", "msg", "Loading…"));
@@ -473,15 +483,26 @@ function renderUpcoming(v) {
       csel.value = upCountry; csel.style.display = "";
     }
     const today = todayStr();
-    const rows = list.filter(c => (c.end || c.start) >= today && c.top >= upThr && (!upCountry || c.cc === upCountry));
-    rows.sort((x, y) => x.start.localeCompare(y.start) || y.top - x.top);
+    let rows, wmap = null;
+    if (upMine) {
+      wmap = new Map();
+      for (const id of getWatch()) { const j = idx(id); if (j < 0) continue; for (const c of upReg.get(id) || []) { if (!wmap.has(c.id)) wmap.set(c.id, []); wmap.get(c.id).push(j); } }
+      if (!getWatch().length) { body.append(el("div", "msg", "No one on your list yet. Open anyone's page and tap Watch to add them.")); return; }
+      rows = list.filter(c => (c.end || c.start) >= today && wmap.has(c.id) && (!upCountry || c.cc === upCountry));
+      for (const c of rows) { const a = wmap.get(c.id); a.sort((x, y) => cur[y] - cur[x] || names[x].localeCompare(names[y])); c.mtop = cur[a[0]]; }
+      rows.sort((x, y) => x.start.localeCompare(y.start) || y.mtop - x.mtop);
+    } else {
+      rows = list.filter(c => (c.end || c.start) >= today && c.top >= upThr && (!upCountry || c.cc === upCountry));
+      rows.sort((x, y) => x.start.localeCompare(y.start) || y.top - x.top);
+    }
     const now = rows.filter(c => c.start <= today), soon = rows.filter(c => c.start > today);
-    body.append(el("div", "count", rows.length + (rows.length === 1 ? " competition" : " competitions") + " with a streak of " + upThr + "+ still running, from accepted registrations."));
-    if (!rows.length) { body.append(el("div", "msg", "Nothing matches. Try a lower streak.")); return; }
+    body.append(el("div", "count", rows.length + (rows.length === 1 ? " competition" : " competitions") + (upMine ? " with people from your list, from accepted registrations." : " with a streak of " + upThr + "+ still running, from accepted registrations.")));
+    if (!rows.length) { body.append(el("div", "msg", upMine ? "No one on your list is registered for an upcoming competition." : "Nothing matches. Try a lower streak.")); return; }
     const row = (box, c) => {
-      const k = c.att.filter(i => cur[i] >= upThr);
+      const k = upMine ? wmap.get(c.id) : c.att.filter(i => cur[i] >= upThr);
       const open = upOpen.has(c.id);
-      const head = rowEl(rangeText(c), c.name, (c.city ? c.city + " \u00b7 " : "") + k.length + " active streak" + (k.length === 1 ? "" : "s") + " " + upThr + "+", String(c.top), true, () => { if (upOpen.has(c.id)) upOpen.delete(c.id); else upOpen.add(c.id); render(); });
+      const who = upMine ? k.slice(0, 2).map(i => names[i]).join(", ") + (k.length > 2 ? " +" + (k.length - 2) : "") : k.length + " active streak" + (k.length === 1 ? "" : "s") + " " + upThr + "+";
+      const head = rowEl(rangeText(c), c.name, (c.city ? c.city + " \u00b7 " : "") + who, String(upMine ? c.mtop : c.top), upMine ? c.mtop > 0 : true, () => { if (upOpen.has(c.id)) upOpen.delete(c.id); else upOpen.add(c.id); render(); });
       head.classList.add("when");
       box.append(head);
       if (open) {
@@ -991,19 +1012,37 @@ function renderPerson(v, i) {
     } else rows.push(["Details", "Streak history is kept for streaks of 3 or more."]);
     for (const [l, t] of rows) { const r = el("div", "r"); r.append(el("span", null, l), el("b", null, t)); info.append(r); }
   });
-  loadNext().then(m => {
+  Promise.all([loadNext(), loadUpcoming().catch(() => null)]).then(([m, list]) => {
     if (!info.isConnected) return;
-    const x = m.get(ids[i]);
-    if (!x) {
-      if (!m.size) return;   // registration data didn't load: show nothing rather than a false N/A
-      const r0 = el("div", "r"); r0.append(el("span", null, "Next comp"), el("b", null, "N/A"));
-      info.prepend(r0); return;
+    const link = (c, parent) => { const a2 = el("a", null, c.name); a2.href = "https://www.worldcubeassociation.org/competitions/" + encodeURIComponent(c.id); a2.target = "_blank"; a2.rel = "noopener"; a2.style.color = "var(--accent)"; parent.append(a2); };
+    const yr = c => (c.start.slice(0, 4) !== String(new Date().getFullYear()) ? ", " + c.start.slice(0, 4) : "");
+    let comps = null;
+    if (list && list.length && upReg.size) {
+      const today = todayStr();
+      comps = (upReg.get(ids[i]) || []).filter(c => (c.end || c.start) >= today).sort((x, y) => x.start.localeCompare(y.start) || (x.end || "").localeCompare(y.end || ""));
     }
+    if (comps === null) {                       // fall back to the saved next competition
+      const x = m.get(ids[i]);
+      if (!x) {
+        if (!m.size) return;   // registration data didn't load: show nothing rather than a false N/A
+        const r0 = el("div", "r"); r0.append(el("span", null, "Next comp"), el("b", null, "N/A"));
+        info.prepend(r0); return;
+      }
+      comps = [{ id: x.id, name: x.name, start: x.start, end: x.end, city: x.city }];
+    }
+    if (!comps.length) { const r0 = el("div", "r"); r0.append(el("span", null, "Next comp"), el("b", null, "N/A")); info.prepend(r0); return; }
     const r = el("div", "r"); r.append(el("span", null, "Next comp"));
-    const b = el("b"); const a2 = el("a", null, x.name);
-    a2.href = "https://www.worldcubeassociation.org/competitions/" + encodeURIComponent(x.id); a2.target = "_blank"; a2.rel = "noopener"; a2.style.color = "var(--accent)";
-    b.append(a2, document.createTextNode(" · " + fmtDate(x.start) + (x.city ? " · " + x.city : "")));
-    r.append(b); info.prepend(r);
+    const b = el("b"); link(comps[0], b);
+    b.append(document.createTextNode(" \u00b7 " + rangeText(comps[0]) + yr(comps[0]) + (comps[0].city ? " \u00b7 " + comps[0].city : "")));
+    r.append(b);
+    if (comps.length > 1) {
+      const all = el("div", "allnext"); all.style.display = "none";
+      for (const c of comps) { const row = el("div"); link(c, row); row.append(document.createTextNode(" \u00b7 " + rangeText(c) + yr(c) + (c.city ? " \u00b7 " + c.city : ""))); all.append(row); }
+      const tg = el("button", "tg", "\u25be " + (comps.length - 1) + " more"); tg.type = "button";
+      tg.addEventListener("click", () => { const o = all.style.display === "none"; all.style.display = o ? "" : "none"; tg.textContent = (o ? "\u25b4 hide" : "\u25be " + (comps.length - 1) + " more"); });
+      b.append(tg);
+      info.prepend(all); info.prepend(r);
+    } else info.prepend(r);
   });
 
   const s = streak[i], ci = ctyIdx[i];
