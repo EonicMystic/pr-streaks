@@ -58,7 +58,7 @@ def jload(text):
 def list_comps(today):
     comps = {}
     for page in range(1, 120):
-        st, body = get(f'/api/v0/competitions?start={today}&page={page}')
+        st, body = get(f'/api/v0/competitions?start={(datetime.date.fromisoformat(today) - datetime.timedelta(days=7)).isoformat()}&page={page}')
         data = jload(body) if st == 200 else None
         if not isinstance(data, list) or not data:
             break
@@ -111,7 +111,8 @@ def diagnose(cid, wid):
 def main():
     out_dir = sys.argv[1]
     path = os.path.join(out_dir, 'next_comps.csv')
-    today = datetime.date.today().isoformat()
+    # keep competitions through the day after they end, so a multi-day comp never drops out early
+    today = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
     comps = list_comps(today)
     print(f'upcoming competitions found: {len(comps)}')
 
