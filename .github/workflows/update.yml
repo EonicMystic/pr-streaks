@@ -36,6 +36,7 @@ jobs:
           mkdir -p site/data history
           python3 build_streaks.py "$RUNNER_TEMP/export.zip" site/data history
           cp index.html site/index.html
+          cp streaks-preview.png site/streaks-preview.png || echo "no preview image found, skipping"
 
       - name: Next competitions
         continue-on-error: true
