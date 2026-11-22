@@ -63,7 +63,7 @@
   .item:last-child { border-bottom: 0; }
   .item:hover { background: var(--bg); }
   .when .rk { flex: 0 0 74px; font-size: .86rem; line-height: 1.2; }
-  .count.sec { margin-top: 14px; font-weight: 600; color: var(--fg, inherit); }
+  .count.sec { margin-top: 14px; font-weight: 600; color: var(--text); }
   .rk { flex: 0 0 64px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--muted); }
   .who { flex: 1 1 auto; min-width: 0; }
   .who .n { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -123,7 +123,16 @@
   .dots i { width: 11px; height: 11px; border-radius: 50%; background: var(--good); display: block; }
   .dots i.end { background: #d1242f; }
   .dots i.now { box-shadow: 0 0 0 3px var(--good-bg); }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chg { font-size: .8rem; margin-top: 2px; font-weight: 600; }
+  .chg.up { color: var(--good); }
+  .chg.down { color: #d1242f; }
+  .chg.new { color: var(--accent); }
   .tl { margin-top: 14px; }
+  .dots i[data-k] { position: relative; cursor: pointer; }
+  .dots i[data-k]::after { content: ""; position: absolute; inset: -4px; }
+  .dots i.sel { outline: 2px solid var(--text); outline-offset: 2px; }
+  .tapinfo { font-size: .88rem; margin-top: 6px; min-height: 1.2em; }
   .tl .cap { color: var(--muted); font-size: .8rem; margin-top: 8px; }
   .actions button.on { background: var(--tab-on); color: var(--tab-on-text); border-color: transparent; }
   textarea { width: 100%; min-height: 84px; padding: 12px 14px; font: .85rem/1.4 ui-monospace, Menlo, monospace; color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: 10px; resize: vertical; }
@@ -382,6 +391,23 @@ function fmtDate(d) {
 }
 function nextText(x) { return x.name + " · " + fmtDate(x.start) + (x.city ? " · " + x.city : ""); }
 
+/* ---------- streak detail (tap a dot) ---------- */
+const EVN = ["3x3", "2x2", "4x4", "5x5", "6x6", "7x7", "3x3 BLD", "FMC", "3x3 OH", "Clock", "Megaminx", "Pyraminx", "Skewb", "Square-1", "4x4 BLD", "5x5 BLD", "Multi-BLD", "Magic", "Master Magic", "Old Multi-BLD", "3x3 Feet"];
+let scComps = null; const scShards = new Map();
+function ymd(n) { return String(Math.floor(n / 10000)) + "-" + String(Math.floor(n / 100) % 100).padStart(2, "0") + "-" + String(n % 100).padStart(2, "0"); }
+function shardOf(w) { let h = 0; for (let k = 0; k < w.length; k++) h = (h * 31 + w.charCodeAt(k)) % 1000003; return h % 256; }
+async function loadStreakDetail(id) {
+  if (!scComps) { const r = await fetch("data/sc/comps.json", { cache: "no-cache" }); if (!r.ok) throw new Error("comps"); scComps = await r.json(); }
+  const sh = shardOf(id);
+  let m = scShards.get(sh);
+  if (!m) {
+    const r = await fetch("data/sc/" + sh + ".txt", { cache: "no-cache" }); if (!r.ok) throw new Error("shard");
+    m = new Map(); for (const ln of (await r.text()).split("\n")) { if (!ln) continue; const p = ln.split("|"); m.set(p[0], { L: p[1] || "", C: p[2] || "", B: p[3] || "" }); }
+    scShards.set(sh, m);
+  }
+  return m.get(id) || null;
+}
+
 /* ---------- upcoming competitions ---------- */
 let upData = null, upThr = 20;
 const upOpen = new Set();
@@ -390,7 +416,7 @@ async function loadUpcoming() {
   const get = async f => { const r = await fetch("data/" + f, { cache: "no-cache" }); if (!r.ok) throw new Error(f); const L = (await r.text()).split("\n"); L.shift(); return L.filter(x => x).map(x => parseLine(x.replace(/\r$/, ""))); };
   const [cs, rs] = await Promise.all([get("comps.csv"), get("registrations.csv")]);
   const map = new Map(), list = [];
-  for (const p of cs) { const c = { id: p[0], name: p[1], start: p[2], end: p[3], city: p[4], total: 0, att: [] }; map.set(c.id, c); list.push(c); }
+  for (const p of cs) { const c = { id: p[0], name: p[1], start: p[2], end: p[3], city: p[4], cc: p[5] || "", total: 0, att: [] }; map.set(c.id, c); list.push(c); }
   for (const p of rs) {
     const c = map.get(p[1]); if (!c) continue;
     c.total++;
@@ -411,6 +437,13 @@ function rangeText(c) {
   const sm = c.start.slice(5, 7) === e.slice(5, 7);
   return sm ? shortDate(c.start) + "\u2013" + String(+e.slice(8, 10)) : shortDate(c.start) + "\u2013" + shortDate(e);
 }
+const REGN = { XA: "Asia (multiple countries)", XE: "Europe (multiple countries)", XF: "Africa (multiple countries)", XM: "Multiple countries (worldwide)", XN: "North America (multiple countries)", XO: "Oceania (multiple countries)", XS: "South America (multiple countries)", XW: "World" };
+let upCountry = store("upCountry") || "";
+function countryName(code) {
+  if (REGN[code]) return REGN[code];
+  try { const n = new Intl.DisplayNames(undefined, { type: "region" }).of(code); if (n && n !== code) return n; } catch (e) {}
+  return code;
+}
 function renderUpcoming(v) {
   const sel = el("select", "small");
   for (const t of [[1, "Any active streak"], [10, "Active streak 10+"], [20, "Active streak 20+"], [30, "Active streak 30+"], [40, "Active streak 40+"]]) {
@@ -418,14 +451,25 @@ function renderUpcoming(v) {
   }
   sel.value = String(upThr);
   sel.addEventListener("change", () => { upThr = +sel.value; shown = PAGE; render(); });
+  const csel = el("select", "small"); csel.style.display = "none";
+  csel.addEventListener("change", () => { upCountry = csel.value; store("upCountry", upCountry); shown = PAGE; render(); });
+  const bar = el("div", "filters"); bar.append(sel, csel);
   const body = el("div");
-  v.append(sel, body);
+  v.append(bar, body);
   body.append(el("div", "msg", "Loading…"));
   loadUpcoming().then(list => {
     if (!body.isConnected) return;
     body.replaceChildren();
+    {
+      const today0 = todayStr(), cnt = new Map();
+      for (const c of list) if ((c.end || c.start) >= today0 && c.cc) cnt.set(c.cc, (cnt.get(c.cc) || 0) + 1);
+      if (upCountry && !cnt.has(upCountry)) upCountry = "";
+      const all = el("option", null, "All countries"); all.value = ""; csel.append(all);
+      for (const [code, n] of [...cnt].sort((a, b) => countryName(a[0]).localeCompare(countryName(b[0])))) { const o = el("option", null, countryName(code) + " (" + n + ")"); o.value = code; csel.append(o); }
+      csel.value = upCountry; csel.style.display = "";
+    }
     const today = todayStr();
-    const rows = list.filter(c => (c.end || c.start) >= today && c.top >= upThr);
+    const rows = list.filter(c => (c.end || c.start) >= today && c.top >= upThr && (!upCountry || c.cc === upCountry));
     rows.sort((x, y) => x.start.localeCompare(y.start) || y.top - x.top);
     const now = rows.filter(c => c.start <= today), soon = rows.filter(c => c.start > today);
     body.append(el("div", "count", rows.length + (rows.length === 1 ? " competition" : " competitions") + " with a streak of " + upThr + "+ still running, from accepted registrations."));
@@ -591,6 +635,8 @@ function renderAbout(v) {
   add("What is the Projections tab?", "It shows where a streak would rank, and what streak a rank takes, using today\'s numbers. Pick a person to start from their own streak. Other people keep competing, so real ranks will shift.");
   add("What is the This week tab?", "Current streaks of 30 or more that grew or ended since the comparison date shown on that tab. It fills in once the site has a week of history.");
   add("How does Competitions and Next comp work?", "They use accepted registrations on the WCA site, refreshed nightly. Only people with a WCA ID appear, and pending or waitlisted registrations don't count. \"Next comp\" is the earliest upcoming competition someone is accepted for. The Competitions tab only counts people with an active current streak, since only those streaks are still on the line.");
+  add("What does tapping a dot do?", "On a person's page, each dot is one competition in the streak. Tap a dot to see which competition it was, its date, and which events had a PR there. Tap the red dot to see the competition that ended the streak. Details are kept for streaks of 3 or more.");
+  add("What does the change line on My list mean?", "When the data updates, My list compares everyone on it with the last time the data changed in your browser. You'll see things like \"+1 since Nov 19\" or \"Streak ended\". It only works from when you first opened My list, and it's saved in this browser only.");
   add("Where is my My list saved?", "In this browser only. It won't follow you to another device or to the Home Screen version of the site. Use Copy and Import at the bottom of My list to move or back it up.");
   add("Where does the data come from?", "The official <a href=\"https://www.worldcubeassociation.org/export/results\" target=\"_blank\" rel=\"noopener\">WCA results export</a>. This is an unofficial fan-made tool and isn't affiliated with the WCA. The code is on <a href=\"https://github.com/EonicMystic/pr-streaks\" target=\"_blank\" rel=\"noopener\">GitHub</a>.");
   add("Something looks wrong", "Open a <a href=\"https://github.com/EonicMystic/pr-streaks/issues/new\" target=\"_blank\" rel=\"noopener\">GitHub issue</a>, or use the Report a problem link on a person's page. It needs a free GitHub account.");
@@ -610,6 +656,12 @@ function setWatch(a) { watchMem = a; try { localStorage.setItem("watch", JSON.st
 function isWatched(id) { return getWatch().includes(id); }
 function toggleWatch(id) { const a = getWatch().slice(); const k = a.indexOf(id); if (k >= 0) a.splice(k, 1); else a.push(id); setWatch(a); return k < 0; }
 
+let dataStamp = null;
+async function getStamp() {
+  if (dataStamp) return dataStamp;
+  try { const t = (await (await fetch("data/updated.csv", { cache: "no-cache" })).text()).split("\n")[1]; if (t) dataStamp = t.trim().replace(" UTC", ""); } catch (e) {}
+  return dataStamp;
+}
 function renderMine(v) {
   const w = getWatch().map(idx).filter(i => i >= 0);
   if (!w.length) {
@@ -620,6 +672,32 @@ function renderMine(v) {
     const box = el("div", "list");
     for (const i of w) { const b = item(cur[i] > 0 ? fmtRank(rankIn(cntAct, cur[i])) : "—", i, null, cur[i]); if (!cur[i]) b.querySelector(".dot").remove(); b.querySelector(".c").textContent = cty[i] + " · Longest " + streak[i]; b.dataset.id = ids[i]; box.append(b); }
     v.append(box);
+    getStamp().then(stamp => {
+      if (!stamp || !box.isConnected) return;
+      let seen = null; try { seen = JSON.parse(store("seen") || "null"); } catch (e) {}
+      const now = {}; for (const i of w) now[ids[i]] = cur[i];
+      if (!seen || !seen.cur) seen = { cur: { stamp, s: now } };
+      else if (seen.cur.stamp !== stamp) seen = { prev: seen.cur, cur: { stamp, s: now } };
+      else seen.cur.s = Object.assign({}, now, seen.cur.s);
+      store("seen", JSON.stringify(seen));
+      if (!seen.prev) return;
+      const since = shortDate(seen.prev.stamp.slice(0, 10));
+      let grew = 0, ended = 0, started = 0;
+      for (const b of box.children) {
+        const id = b.dataset.id, was = seen.prev.s[id], n = now[id];
+        if (was === undefined || n === undefined || was === n) continue;
+        let t, cls;
+        if (n > was && was > 0) { t = "+" + (n - was) + " since " + since + " (was " + was + ")"; cls = "up"; grew++; }
+        else if (n > 0 && was === 0) { t = "New streak since " + since; cls = "new"; started++; }
+        else if (n === 0) { t = "Streak ended since " + since + " (was " + was + ")"; cls = "down"; ended++; }
+        else { t = "Streak reset since " + since + " (was " + was + ", now " + n + ")"; cls = "down"; ended++; }
+        b.querySelector(".who").append(el("div", "chg " + cls, t));
+      }
+      const parts = [];
+      if (grew) parts.push(grew + " grew"); if (started) parts.push(started + " started"); if (ended) parts.push(ended + " ended");
+      const cnt = v.querySelector(".count");
+      if (cnt) cnt.textContent += " · since " + since + ": " + (parts.length ? parts.join(", ") : "no changes");
+    });
     loadNext().then(m => {
       for (const b of box.children) {
         if (!m.size) return;
@@ -837,11 +915,33 @@ function renderPerson(v, i) {
   d.append(h, el("div", "meta", ids[i] + " · " + cty[i]));
 
   const c = cur[i];
-  const dotsRow = (n, ring, endRed, cap) => {
+  const dotsRow = (n, ring, endRed, cap, kind) => {
     const tl = el("div", "tl"), dots = el("div", "dots");
-    for (let k = 0; k < n; k++) { const x = el("i"); if (ring && k === n - 1) x.className = "now"; dots.append(x); }
-    if (endRed) dots.append(el("i", "end"));
-    tl.append(dots, el("div", "cap", cap)); d.append(tl);
+    const tappable = streak[i] >= 3 && n <= 120;
+    for (let k = 0; k < n; k++) { const x = el("i"); if (ring && k === n - 1) x.className = "now"; if (tappable) x.dataset.k = String(k); dots.append(x); }
+    if (endRed) { const x = el("i", "end"); if (tappable) x.dataset.k = "end"; dots.append(x); }
+    const tap = el("div", "tapinfo");
+    tl.append(dots, el("div", "cap", cap + (tappable ? " Tap a dot to see the competition." : "")), tap); d.append(tl);
+    if (!tappable) return;
+    dots.addEventListener("click", ev => {
+      const t = ev.target.closest("i"); if (!t || t.dataset.k === undefined) return;
+      for (const o of dots.children) o.classList.remove("sel");
+      t.classList.add("sel");
+      tap.textContent = "Loading…";
+      loadStreakDetail(ids[i]).then(rec => {
+        if (!t.isConnected) return;
+        if (!rec) { tap.textContent = "No details for this streak."; return; }
+        if (t.dataset.k === "end") {
+          const b = rec.B ? scComps[parseInt(rec.B, 36)] : null;
+          tap.textContent = b ? "Ended at " + b[1] + " · " + fmtDate(ymd(b[0])) + " · no PR there" : "No details for this one."; return;
+        }
+        const list = (kind === "C" ? rec.C : rec.L).split(","), k = +t.dataset.k, e = list[k];
+        if (!e) { tap.textContent = "No details for this one."; return; }
+        const [ci, mk] = e.split(".").map(x => parseInt(x, 36)), cc = scComps[ci];
+        const evs = []; for (let b = 0; b < EVN.length; b++) if (mk & (1 << b)) evs.push(EVN[b]);
+        tap.textContent = "#" + (k + 1) + " · " + (cc ? cc[1] + " · " + fmtDate(ymd(cc[0])) : "?") + (evs.length ? " · PR in " + evs.join(", ") : "");
+      }).catch(() => { tap.textContent = "Couldn't load the details. Try again."; });
+    });
   };
   // longest streak: number, status, how rare, dots
   const big = el("div", "big");
@@ -850,7 +950,7 @@ function renderPerson(v, i) {
   d.append(el("span", "badge" + (active[i] ? " on" : ""), active[i] ? "Active — streak still running" : "Longest streak ended"));
   d.append(el("div", "rar", "Longer than " + pct(rarity(streak[i])) + "% of all " + totalAll.toLocaleString() + " competitors with a PR streak."));
   if (streak[i] <= 120) {
-    dotsRow(streak[i], active[i], !active[i], active[i] ? "One dot per competition in the streak. The ringed dot is the latest." : "Longest streak: one dot per competition. The red dot is the competition without a PR that ended it.");
+    dotsRow(streak[i], active[i], !active[i], active[i] ? "One dot per competition in the streak. The ringed dot is the latest." : "Longest streak: one dot per competition. The red dot is the competition without a PR that ended it.", "L");
   }
   // current streak (only shown separately when the longest one has ended)
   if (!active[i]) {
@@ -858,7 +958,7 @@ function renderPerson(v, i) {
     big2.append(el("b", null, String(c)), el("span", "l", "current streak"));
     d.append(big2);
     d.append(el("span", "badge" + (c > 0 ? " on" : ""), c > 0 ? "Running now" : "Not running — latest comp had no PR"));
-    if (c > 0 && c <= 120) dotsRow(c, true, false, "Current streak: one dot per competition. The ringed dot is the latest.");
+    if (c > 0 && c <= 120) dotsRow(c, true, false, "Current streak: one dot per competition. The ringed dot is the latest.", "C");
   }
   const info = el("div", "info"); d.append(info);
   loadDetails().then(m => {
