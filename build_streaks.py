@@ -103,7 +103,72 @@ for pid, comps in att.items():
                             start=comp_name[bs], end=comp_name[be], active=cur > 0, still=still,
                             run=cur, run_start=comp_name[cs] if cur > 0 else '',
                             total_comps=len(ordered), last_comp=comp_name[ordered[-1]], recent=recent,
-                            broke_at=broke, current=cur))
+                            broke_at=broke, current=cur,
+                            lc=ordered[bi - best + 1:bi + 1] if best >= 3 else None,
+                            cc=ordered[len(ordered) - cur:] if (best >= 3 and cur > 0 and not still) else None,
+                            bk=ordered[bi + 1] if (best >= 3 and not still) else None))
+
+# ---------- per-competition detail for streaks of 3+ (tap a dot on a person page) ----------
+EVENTS = ['333', '222', '444', '555', '666', '777', '333bf', '333fm', '333oh', 'clock', 'minx', 'pyram',
+          'skewb', 'sq1', '444bf', '555bf', '333mbf', 'magic', 'mmagic', '333mbo', '333ft']
+EVBIT = {e: i for i, e in enumerate(EVENTS)}
+need = {}
+for r in results:
+    if r['lc']:
+        need[r['wca_id']] = set(r['lc']) | set(r['cc'] or ())
+evs = defaultdict(dict)                 # person -> comp -> bitmask of events with a PR there
+for (pid, ev), comps in pe.items():
+    nd = need.get(pid)
+    bit = EVBIT.get(ev)
+    if nd is None or bit is None:
+        continue
+    br = ar = BIG
+    for c in sorted(comps, key=key):
+        bm, am = comps[c]
+        ok = False
+        if bm < BIG and bm <= br: ok = True; br = bm
+        if am < BIG and am <= ar: ok = True; ar = am
+        if ok and c in nd:
+            evs[pid][c] = evs[pid].get(c, 0) | (1 << bit)
+used = set()
+for r in results:
+    if r['lc']:
+        used.update(r['lc']); used.update(r['cc'] or ())
+        if r['bk']: used.add(r['bk'])
+cidx = {c: i for i, c in enumerate(sorted(used, key=key))}
+SHARDS = 256
+def shard_of(w):
+    h = 0
+    for ch in w:
+        h = (h * 31 + ord(ch)) % 1000003
+    return h % SHARDS
+def b36(n):
+    d = '0123456789abcdefghijklmnopqrstuvwxyz'
+    if n == 0: return '0'
+    o = ''
+    while n: n, m = divmod(n, 36); o = d[m] + o
+    return o
+sc_dir = os.path.join(out_dir, 'sc')
+os.makedirs(sc_dir, exist_ok=True)
+for f_ in os.listdir(sc_dir):
+    os.remove(os.path.join(sc_dir, f_))
+shards = defaultdict(list)
+for r in results:
+    if not r['lc']:
+        continue
+    m = evs.get(r['wca_id'], {})
+    enc = lambda lst: ','.join(b36(cidx[c]) + '.' + b36(m.get(c, 0)) for c in lst)
+    line = r['wca_id'] + '|' + enc(r['lc']) + '|' + (enc(r['cc']) if r['cc'] else '') + '|' + (b36(cidx[r['bk']]) if r['bk'] else '')
+    shards[shard_of(r['wca_id'])].append(line)
+for k, lines in shards.items():
+    with open(os.path.join(sc_dir, f'{k}.txt'), 'w', encoding='utf-8') as f_:
+        f_.write('\n'.join(lines))
+with open(os.path.join(sc_dir, 'comps.json'), 'w', encoding='utf-8') as f_:
+    json.dump([[comp_date[c][0] * 10000 + comp_date[c][1] * 100 + comp_date[c][2], comp_name[c]] for c in sorted(cidx, key=cidx.get)], f_, ensure_ascii=False, separators=(',', ':'))
+print('streak detail shards:', len(shards), 'competitions used:', len(cidx))
+for r in results:           # free the lists
+    r['lc'] = r['cc'] = r['bk'] = None
+del evs, need
 
 def ranked(subset, fld='streak'):
     subset = sorted(subset, key=lambda r: (-r[fld], r['name']))
