@@ -79,6 +79,12 @@ jobs:
           git pull --rebase -q origin main
           git push
 
+      - name: Check the site folder
+        run: |
+          ls -la site site/data
+          test "$(wc -c < site/data/people.csv)" -gt 1000000
+          test -s site/index.html
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
