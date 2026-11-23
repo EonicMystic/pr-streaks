@@ -22,6 +22,8 @@ if src.endswith('.zip'):
     with zipfile.ZipFile(src) as z:
         for name in ('competitions', 'persons', 'results'):
             z.extract(f'WCA_export_{name}.tsv', tmp)
+        if 'WCA_export_countries.tsv' in z.namelist():
+            z.extract('WCA_export_countries.tsv', tmp)
         if 'metadata.json' in z.namelist():
             z.extract('metadata.json', tmp)
     D = tmp
@@ -275,6 +277,20 @@ def rank_of(board, value):
     return f'T-{rank}' if tied else rank
 NA = '——'
 by_id = {r['wca_id']: r for r in results}
+
+# ---------- which continent each country is in (the site builds its continent rankings from this) ----------
+try:
+    with open(os.path.join(out_dir, 'continents.csv'), 'w', newline='', encoding='utf-8') as f:
+        w = csv.writer(f)
+        w.writerow(['Country', 'Continent'])
+        n_ = 0
+        for idx, p in rows('countries'):
+            cont = p[idx['continent_id']].lstrip('_')
+            if cont:
+                w.writerow([p[idx['id']], cont]); n_ += 1
+    print('continents.csv:', n_, 'countries')
+except Exception as e:
+    print('No continent list written:', e)
 
 # ---------- non-US countries: everyone with a streak of COUNTRY_MIN or more ----------
 by_country = defaultdict(list)
