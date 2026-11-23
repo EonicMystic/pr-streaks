@@ -45,6 +45,10 @@ except Exception:
 _export_day = datetime.date.fromisoformat(_stamp[:10]) if _stamp[:10] else datetime.date.today()
 _cut = _export_day - datetime.timedelta(days=365)
 CUTOFF = (_cut.year, _cut.month, _cut.day)      # "last 12 months" means comps after this date
+GAIN_DAYS = [7, 30, 90, 180, 365]                # windows for the 'streak gained' tab
+GAIN_MIN_RUN = 3                                 # only running streaks of at least this many comps are listed
+_gcuts = [_export_day - datetime.timedelta(days=d) for d in GAIN_DAYS]
+_gcuts = [(c.year, c.month, c.day) for c in _gcuts]
 
 comp_date, comp_name = {}, {}
 for idx, p in rows('competitions'):
@@ -104,6 +108,7 @@ for pid, comps in att.items():
                             run=cur, run_start=comp_name[cs] if cur > 0 else '',
                             total_comps=len(ordered), last_comp=comp_name[ordered[-1]], recent=recent,
                             broke_at=broke, current=cur,
+                            gains=[sum(1 for c in ordered[len(ordered) - cur:] if comp_date[c] > g) for g in _gcuts] if cur >= GAIN_MIN_RUN else None,
                             lc=ordered[bi - best + 1:bi + 1] if best >= 3 else None,
                             cc=ordered[len(ordered) - cur:] if (best >= 3 and cur > 0 and not still) else None,
                             bk=ordered[bi + 1] if (best >= 3 and not still) else None))
@@ -303,6 +308,14 @@ with open(os.path.join(out_dir, 'people.csv'), 'w', newline='', encoding='utf-8'
     w.writerow(['Name', 'WCA ID', 'Country', 'Streak', 'Active', 'Current'])
     for r in results:
         w.writerow([r['name'], r['wca_id'], r['country'], r['streak'], 1 if r['still'] else 0, r['run']])
+
+# ---------- how much running streaks have grown over the last 7 / 30 / 90 / 180 / 365 days ----------
+with open(os.path.join(out_dir, 'gains.csv'), 'w', newline='', encoding='utf-8') as f:
+    w = csv.writer(f)
+    w.writerow(['Name', 'WCA ID', 'Country', 'Current'] + [f'G{d}' for d in GAIN_DAYS])
+    for r in sorted(results, key=lambda r: (-r['run'], r['name'])):
+        if r['gains'] and r['gains'][-1] > 0:
+            w.writerow([r['name'], r['wca_id'], r['country'], r['run']] + r['gains'])
 
 # ---------- extra detail for longer streaks (loaded by the site only when someone opens a person) ----------
 with open(os.path.join(out_dir, 'details.csv'), 'w', newline='', encoding='utf-8') as f:
