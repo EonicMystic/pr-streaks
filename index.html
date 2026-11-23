@@ -201,6 +201,8 @@ const TABS = [
   { id: "proj",      label: "Projections" },
   { id: "worldAll",  label: "World all-time" },
   { id: "worldAct",  label: "World active" },
+  { id: "continentAll", label: "Continent all-time" },
+  { id: "continentAct", label: "Continent active" },
   { id: "countryAll", label: "Country all-time" },
   { id: "countryAct", label: "Country active" }
 ];
@@ -221,6 +223,7 @@ let streak, active, cur, countryList = [], cIndex = new Map(), ctyIdx;
 let buckets = [];                       // buckets[s] = person indexes with streak s
 let cntAll = [], cntAct = [], ccAll = [], ccAct = []; // streak -> count (world), per-country arrays
 let totalAll = 0, totalAct = 0, runBuckets = [];
+let contList = [], kIndex = new Map(), kByCi = [], kAll = [], kAct = [], kOfCountry = new Map();   // continents (built from data/continents.csv)
 const MAXS = 200;
 
 function parseLine(line) {
@@ -292,7 +295,27 @@ async function load() {
   }
   N = i;
   countryList.sort((a, b) => a.localeCompare(b));
+  await loadContinents();
 }
+async function loadContinents() {
+  contList = []; kIndex = new Map(); kByCi = []; kAll = []; kAct = []; kOfCountry = new Map();
+  try {
+    const t = await fetchRetry("data/continents.csv", false);
+    const L = t.split("\n"); L.shift();
+    for (const ln of L) { if (!ln) continue; const p = parseLine(ln.replace(/\r$/, "")); if (p.length >= 2) kOfCountry.set(p[0], p[1]); }
+  } catch (e) { return; }
+  const seen = [...new Set(cty.length ? [...cIndex.keys()].map(c => kOfCountry.get(c)).filter(Boolean) : [])].sort((a, b) => a.localeCompare(b));
+  contList = seen;
+  seen.forEach((c, k) => { kIndex.set(c, k); kAll.push(new Int32Array(MAXS + 2)); kAct.push(new Int32Array(MAXS + 2)); });
+  for (const [c, ci] of cIndex) {
+    const k = kIndex.get(kOfCountry.get(c));
+    kByCi[ci] = k === undefined ? -1 : k;
+    if (k === undefined) continue;
+    for (let t = 0; t <= MAXS + 1; t++) { kAll[k][t] += ccAll[ci][t]; kAct[k][t] += ccAct[ci][t]; }
+  }
+}
+const hasCont = () => contList.length > 0;
+const contOf = i => { const k = kByCi[ctyIdx[i]]; return k === undefined ? -1 : k; };
 
 /* rank of a streak value inside one board: returns {rank, tied, total} */
 function rankIn(counts, s) {
@@ -304,14 +327,17 @@ const fmtRank = r => (r.tied ? "T-" : "#") + r.rank.toLocaleString();
 
 /* ---------------- boards ---------------- */
 function boardRows(kind, country, limit) {
-  const needActive = kind === "worldAct" || kind === "countryAct";
+  const needActive = kind === "worldAct" || kind === "countryAct" || kind === "continentAct";
   const byCountry = kind === "countryAll" || kind === "countryAct";
+  const byCont = kind === "continentAll" || kind === "continentAct";
   const ci = byCountry ? cIndex.get(country) : -1;
+  const ki = byCont ? kIndex.get(country) : -1;
   const rows = []; let before = 0, more = false;
   for (let s = MAXS; s >= 1 && !more; s--) {
     const b = (needActive ? runBuckets : buckets)[s]; if (!b.length) continue;
     let m = b;
     if (byCountry) m = b.filter(i => ctyIdx[i] === ci);
+    else if (byCont) m = b.filter(i => contOf(i) === ki);
     if (!m.length) continue;
     m = m.slice().sort((x, y) => names[x].localeCompare(names[y]));
     const tied = m.length > 1;
@@ -325,7 +351,7 @@ function boardRows(kind, country, limit) {
 }
 
 /* ---------------- views ---------------- */
-let tab = "lookup", shown = PAGE, query = "", country = store("country") || "";
+let tab = "lookup", shown = PAGE, query = "", country = store("country") || "", continent = store("continent") || "";
 
 let idMap = null;
 function idx(id) { if (!idMap) { idMap = new Map(); for (let i = 0; i < N; i++) idMap.set(ids[i], i); } const v = idMap.get(id); return v === undefined ? -1 : v; }
@@ -561,19 +587,21 @@ function renderProj(v) {
   const nIn = el("input"); nIn.type = "number"; nIn.min = "1"; nIn.max = String(MAXS); nIn.inputMode = "numeric"; nIn.placeholder = "Streak, e.g. 44"; nIn.value = projN;
   const rIn = el("input"); rIn.type = "number"; rIn.min = "1"; rIn.inputMode = "numeric"; rIn.placeholder = "Rank, e.g. 10"; rIn.value = projR;
   const cat = el("select");
-  for (const [k, l] of [["worldAll", "World all-time"], ["worldAct", "World active"], ["countryAll", "Country all-time"], ["countryAct", "Country active"]]) { const o = el("option", null, l); o.value = k; cat.append(o); }
+  for (const [k, l] of [["worldAll", "World all-time"], ["worldAct", "World active"], ...(hasCont() ? [["continentAll", "Continent all-time"], ["continentAct", "Continent active"]] : []), ["countryAll", "Country all-time"], ["countryAct", "Country active"]]) { const o = el("option", null, l); o.value = k; cat.append(o); }
   cat.value = projCat;
   const boxes = el("div"), ladder = el("div"), need = el("div");
 
   const ownVals = () => {
-    const p = projP, inC = p >= 0 && cty[p] === country;
-    return { all: p >= 0 ? streak[p] : 0, act: p >= 0 ? cur[p] : 0, cAll: inC ? streak[p] : 0, cAct: inC ? cur[p] : 0 };
+    const p = projP, inC = p >= 0 && cty[p] === country, ki = projK(), inK = p >= 0 && ki >= 0 && contOf(p) === ki;
+    return { all: p >= 0 ? streak[p] : 0, act: p >= 0 ? cur[p] : 0, cAll: inC ? streak[p] : 0, cAct: inC ? cur[p] : 0, kAll: inK ? streak[p] : 0, kAct: inK ? cur[p] : 0 };
   };
+  const projK = () => { const c = country ? kOfCountry.get(country) : null; const k = c ? kIndex.get(c) : undefined; return k === undefined ? -1 : k; };
   const ranksFor = n => {
-    const p = projP, o = ownVals(), ci = country ? cIndex.get(country) : -1;
+    const p = projP, o = ownVals(), ci = country ? cIndex.get(country) : -1, ki = projK();
     const allVal = p >= 0 ? Math.max(streak[p], n) : n;      // all-time can't go down
     return [
       fmtP(projRank(cntAll, allVal, o.all)), fmtP(projRank(cntAct, n, o.act)),
+      ki >= 0 ? fmtP(projRank(kAll[ki], allVal, o.kAll)) : "—", ki >= 0 ? fmtP(projRank(kAct[ki], n, o.kAct)) : "—",
       ci >= 0 ? fmtP(projRank(ccAll[ci], allVal, o.cAll)) : "—", ci >= 0 ? fmtP(projRank(ccAct[ci], n, o.cAct)) : "—"
     ];
   };
@@ -582,14 +610,16 @@ function renderProj(v) {
     boxes.replaceChildren(); ladder.replaceChildren();
     if (n >= 1 && n <= MAXS) {
       const g = el("div", "grid");
-      const labels = ["World all-time", "World active", (country || "Country") + " all-time", (country || "Country") + " active"];
+      const kn = projK() >= 0 ? contList[projK()] : "Continent";
+      const labels = ["World all-time", "World active", kn + " all-time", kn + " active", (country || "Country") + " all-time", (country || "Country") + " active"];
       ranksFor(n).forEach((r, k) => { const b = el("div", "box" + (r === "—" ? " off" : "")); b.append(el("span", null, labels[k]), el("strong", null, r)); g.append(b); });
       boxes.append(g);
       const h = el("div", "r h"); for (const t of ["Streak", "World all-time", "World active", "Country all-time", "Country active"]) h.append(el("span", null, t));
       ladder.append(h);
       for (let k = n; k < Math.min(n + 8, MAXS + 1); k++) {
         const r = el("div", "r" + (k === n ? " on" : "")); r.append(el("span", null, String(k)));
-        for (const t of ranksFor(k)) r.append(el("span", null, t));
+        const rf = ranksFor(k);
+        for (const t of [rf[0], rf[1], rf[4], rf[5]]) r.append(el("span", null, t));
         ladder.append(r);
       }
       ladder.className = "ladder";
@@ -599,15 +629,17 @@ function renderProj(v) {
     need.replaceChildren();
     const rk = parseInt(rIn.value, 10), ci = country ? cIndex.get(country) : -1, o = ownVals();
     const isC = projCat === "countryAll" || projCat === "countryAct";
+    const isK = projCat === "continentAll" || projCat === "continentAct", ki = projK();
     if (isC && ci < 0) { need.append(el("div", "msg", "Choose a country above to use a country category.")); return; }
+    if (isK && ki < 0) { need.append(el("div", "msg", "Choose a country above to use its continent.")); return; }
     if (!(rk >= 1)) { need.append(el("div", "msg", "Enter the rank you want.")); return; }
-    const counts = projCat === "worldAll" ? cntAll : projCat === "worldAct" ? cntAct : projCat === "countryAll" ? ccAll[ci] : ccAct[ci];
-    const own = projCat === "worldAll" ? o.all : projCat === "worldAct" ? o.act : projCat === "countryAll" ? o.cAll : o.cAct;
+    const counts = projCat === "worldAll" ? cntAll : projCat === "worldAct" ? cntAct : projCat === "continentAll" ? kAll[ki] : projCat === "continentAct" ? kAct[ki] : projCat === "countryAll" ? ccAll[ci] : ccAct[ci];
+    const own = projCat === "worldAll" ? o.all : projCat === "worldAct" ? o.act : projCat === "continentAll" ? o.kAll : projCat === "continentAct" ? o.kAct : projCat === "countryAll" ? o.cAll : o.cAct;
     let found = 0, res = null;
     for (let t = 1; t <= MAXS; t++) { const r = projRank(counts, t, own); if (r.rank <= rk) { found = t; res = r; break; } }
     const box = el("div", "res");
     if (!found) { box.append(el("div", "s", "No streak reaches that rank.")); need.append(box); return; }
-    const label = el("div", "s", (projCat.startsWith("world") ? "World" : country) + (projCat.endsWith("All") ? " all-time" : " active") + " · rank " + rk.toLocaleString());
+    const label = el("div", "s", (projCat.startsWith("world") ? "World" : isK ? contList[ki] : country) + (projCat.endsWith("All") ? " all-time" : " active") + " · rank " + rk.toLocaleString());
     box.append(label, el("b", null, "A streak of " + found));
     box.append(el("div", "s", "That puts you at " + fmtP(res) + (res.tied ? ", tied with " + res.eq + (res.eq === 1 ? " other person" : " other people") : "") + "."));
     if (res.tied && res.rank < rk) { /* tie shares a better rank than asked for */ }
@@ -663,7 +695,7 @@ function renderAbout(v) {
   add("What is a PR streak?", "The number of competitions in a row that a person attended where they set a personal record (PR) in at least one event. Competitions are taken in date order, and one competition without a PR ends the run.");
   add("What counts as a PR?", "A new best single or average in any event, compared with everything that person did before that competition. Matching your previous best counts too.");
   add("What do Longest, Current and Active mean?", "<b>Longest</b> is a person's best-ever streak. <b>Current</b> is the PR run they're on right now, counted back from their latest competition, and it can be shorter than their longest. <b>Active</b> means they have a current streak: their most recent competition had a PR. A person's page shows both numbers when they differ.");
-  add("How are ranks worked out?", "All-time rankings use each person\'s longest streak and Active rankings use their current streak. People with the same number share the best rank and show it as T- (for example T-196). Country ranks only compare people from the same country. Active ranks only compare people whose streak is still running. \"Longer than\" is the share of all competitors whose longest streak is shorter.");
+  add("How are ranks worked out?", "All-time rankings use each person\'s longest streak and Active rankings use their current streak. People with the same number share the best rank and show it as T- (for example T-196). Continent and country ranks only compare people from the same continent or country. Active ranks only compare people whose streak is still running. \"Longer than\" is the share of all competitors whose longest streak is shorter.");
   add("Why can't I find someone?", "People with no PR competitions, or who haven't competed yet, aren't listed. New results also take time to appear: the site rebuilds every night from the official WCA results export, which can lag a competition by a day or more.");
   add("What is the Projections tab?", "It shows where a streak would rank, and what streak a rank takes, using today\'s numbers. Pick a person to start from their own streak. Other people keep competing, so real ranks will shift.");
   add("What is the This week tab?", "Current streaks of 30 or more that grew or ended since the comparison date shown on that tab. It fills in once the site has a week of history.");
@@ -887,6 +919,16 @@ function renderWeek(v) {
 
 function renderBoard(v) {
   const byCountry = tab === "countryAll" || tab === "countryAct";
+  const byCont = tab === "continentAll" || tab === "continentAct";
+  if (byCont) {
+    if (!hasCont()) { v.append(el("div", "msg", "Continent rankings aren't available yet. They appear after the next update.")); return; }
+    const sel = el("select"); const first = el("option", null, "Choose a continent…"); first.value = ""; sel.append(first);
+    for (const c of contList) { const o = el("option", null, c); o.value = c; sel.append(o); }
+    sel.value = continent;
+    sel.addEventListener("change", () => { continent = sel.value; store("continent", continent); shown = PAGE; render(); });
+    v.append(sel);
+    if (!continent) { v.append(el("div", "msg", "Pick a continent to see its ranking.")); return; }
+  }
   if (byCountry) {
     const sel = el("select"); const first = el("option", null, "Choose a country…"); first.value = ""; sel.append(first);
     for (const c of countryList) { const o = el("option", null, c); o.value = c; sel.append(o); }
@@ -895,10 +937,10 @@ function renderBoard(v) {
     v.append(sel);
     if (!country) { v.append(el("div", "msg", "Pick a country to see its ranking.")); return; }
   }
-  const { rows, more } = boardRows(tab, country, shown);
+  const { rows, more } = boardRows(tab, byCont ? continent : country, shown);
   if (!rows.length) { v.append(el("div", "msg", "No one to show.")); return; }
   const box = el("div", "list");
-  const isAct = tab === "worldAct" || tab === "countryAct";
+  const isAct = tab === "worldAct" || tab === "countryAct" || tab === "continentAct";
   for (const r of rows) box.append(item(r.rank, r.i, null, isAct ? r.val : undefined));
   v.append(box);
   if (more) {
@@ -933,6 +975,7 @@ function stats(i) {
     streak: s, a, cur: c,
     wAll: fmtRank(rankIn(cntAll, s)), wAct: c > 0 ? fmtRank(rankIn(cntAct, c)) : "—",
     cAll: fmtRank(rankIn(ccAll[ci], s)), cAct: c > 0 ? fmtRank(rankIn(ccAct[ci], c)) : "—",
+    kAll: contOf(i) >= 0 ? fmtRank(rankIn(kAll[contOf(i)], s)) : "—", kAct: contOf(i) >= 0 && c > 0 ? fmtRank(rankIn(kAct[contOf(i)], c)) : "—",
     rar: pct(rarity(s)) + "%"
   };
 }
@@ -955,7 +998,7 @@ async function shareLink(i, btn) {
 }
 
 async function saveCard(i, btn) {
-  const st = stats(i), W = 1080, H = 1080;
+  const st = stats(i), W = 1080, H = hasCont() && contOf(i) >= 0 ? 1200 : 1080;
   const c = document.createElement("canvas"); c.width = W; c.height = H;
   const g = c.getContext("2d");
   g.fillStyle = "#0e1116"; g.fillRect(0, 0, W, H);
@@ -970,14 +1013,16 @@ async function saveCard(i, btn) {
   g.fillStyle = "#9aa4b0"; g.font = "400 38px " + F; g.fillText("competitions in a row with a PR", 72, 620);
   g.fillStyle = st.cur > 0 ? "#56d364" : "#9aa4b0"; g.font = "700 40px " + F;
   g.fillText(st.a ? "● Active streak" : (st.cur > 0 ? "Ended  ·  current streak " + st.cur : "Ended"), 72, 690);
-  const cells = [["World all-time", st.wAll], ["World active", st.wAct], [cty[i] + " all-time", st.cAll], [cty[i] + " active", st.cAct]];
+  const cells = [["World all-time", st.wAll], ["World active", st.wAct]];
+  if (hasCont() && contOf(i) >= 0) cells.push([contList[contOf(i)] + " all-time", st.kAll], [contList[contOf(i)] + " active", st.kAct]);
+  cells.push([cty[i] + " all-time", st.cAll], [cty[i] + " active", st.cAct]);
   cells.forEach((x, k) => {
     const cx = 72 + (k % 2) * 480, cy = 740 + Math.floor(k / 2) * 130;
     g.fillStyle = "#171b22"; g.fillRect(cx, cy, 456, 112);
     g.fillStyle = "#9aa4b0"; g.font = "400 28px " + F; g.fillText(x[0], cx + 20, cy + 38);
     g.fillStyle = "#e6e9ee"; g.font = "700 48px " + F; g.fillText(x[1], cx + 20, cy + 92);
   });
-  g.fillStyle = "#9aa4b0"; g.font = "400 28px " + F; g.fillText(location.host + location.pathname.replace(/index\.html$/, ""), 72, 1040);
+  g.fillStyle = "#9aa4b0"; g.font = "400 28px " + F; g.fillText(location.host + location.pathname.replace(/index\.html$/, ""), 72, H - 40);
   const blob = await new Promise(r => c.toBlob(r, "image/png"));
   if (!blob) { flash(btn, "Couldn't make card"); return; }
   const file = new File([blob], "pr-streak-" + ids[i] + ".png", { type: "image/png" });
@@ -1108,9 +1153,12 @@ function renderPerson(v, i) {
     else { b.append(el("strong", null, "—"), el("small", null, "Not active")); }
     return b;
   };
+  const ki = contOf(i);
   grid.append(
     box("World all-time", cntAll, true, "competitors", s),
-    box("World active", cntAct, c > 0, "active streaks", c),
+    box("World active", cntAct, c > 0, "active streaks", c));
+  if (ki >= 0) grid.append(box(contList[ki] + " all-time", kAll[ki], true, "competitors", s), box(contList[ki] + " active", kAct[ki], c > 0, "active streaks", c));
+  grid.append(
     box(cty[i] + " all-time", ccAll[ci], true, "competitors", s),
     box(cty[i] + " active", ccAct[ci], c > 0, "active streaks", c)
   );
@@ -1118,7 +1166,9 @@ function renderPerson(v, i) {
 
   if (c > 0) {
     const t = el("div", "target"); t.append(el("h3", null, "Next target"));
-    t.append(el("p", null, targetLine("World active", cntAct, c)), el("p", null, targetLine(cty[i] + " active", ccAct[ci], c)));
+    t.append(el("p", null, targetLine("World active", cntAct, c)));
+    if (ki >= 0) t.append(el("p", null, targetLine(contList[ki] + " active", kAct[ki], c)));
+    t.append(el("p", null, targetLine(cty[i] + " active", ccAct[ci], c)));
     d.append(t);
   }
 
@@ -1175,11 +1225,16 @@ function renderCompare(v, ia, ib) {
   row("Current streak", String(x.cur), String(y.cur), [-x.cur, -y.cur]);
   row("World all-time", x.wAll, y.wAll, [rn(x.wAll), rn(y.wAll)]);
   row("World active", x.wAct, y.wAct, [rn(x.wAct), rn(y.wAct)]);
+  if (hasCont()) {
+    row("Continent", contOf(A) >= 0 ? contList[contOf(A)] : "—", contOf(B) >= 0 ? contList[contOf(B)] : "—");
+    row("Continent all-time", x.kAll, y.kAll, [rn(x.kAll), rn(y.kAll)]);
+    row("Continent active", x.kAct, y.kAct, [rn(x.kAct), rn(y.kAct)]);
+  }
   row("Country all-time", x.cAll, y.cAll, [rn(x.cAll), rn(y.cAll)]);
   row("Country active", x.cAct, y.cAct, [rn(x.cAct), rn(y.cAct)]);
   row("Longer than", x.rar, y.rar);
   v.append(t);
-  v.append(el("div", "count", "Country ranks are within each person's own country."));
+  v.append(el("div", "count", "Continent and country ranks are within each person's own continent and country."));
 }
 
 function render() {
@@ -1210,7 +1265,7 @@ async function boot() {
     const box = el("div", "msg");
     box.append(el("div", null, "Couldn't load the data."), el("div", "s", String((e && e.message) || e)));
     const b = el("button", "more", "Try again"); b.type = "button";
-    b.addEventListener("click", () => { names = []; ids = []; cty = []; hay = null; countryList = []; cIndex = new Map(); ccAll = []; ccAct = []; totalAll = 0; totalAct = 0; idMap = null; boot(); });
+    b.addEventListener("click", () => { names = []; ids = []; cty = []; hay = null; countryList = []; cIndex = new Map(); ccAll = []; ccAct = []; contList = []; totalAll = 0; totalAct = 0; idMap = null; boot(); });
     v.replaceChildren(box, b);
     return;
   }
