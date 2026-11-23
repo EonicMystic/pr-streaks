@@ -237,22 +237,25 @@ function parseLine(line) {
   return out;
 }
 
-async function fetchRetry(url) {
+async function fetchRetry(url, patient) {
+  // patient = the page can't work without this file: a 404 may just be GitHub Pages still catching up after a deploy,
+  // so keep trying, and after the first two tries add a throwaway query string to get past any cached "not found".
   let last;
-  for (let k = 0; k < 4; k++) {
+  for (let k = 0; k < (patient ? 6 : 4); k++) {
+    const u = patient && k >= 2 ? url + (url.includes("?") ? "&" : "?") + "cb=" + Date.now() : url;
     try {
-      const r = await fetch(url, { cache: k === 0 ? "no-cache" : "reload" });
+      const r = await fetch(u, { cache: k === 0 ? "no-cache" : "reload" });
       if (r.ok) return await r.text();
       last = new Error("the server answered " + r.status);
-      if (r.status === 404) break;                    // not going to appear by waiting
+      if (r.status === 404 && !patient) break;        // optional file: not going to appear by waiting
     } catch (e) { last = e; }
     await new Promise(res => setTimeout(res, 1200 * (k + 1)));
   }
-  throw last || new Error("unknown error");
+  throw last;
 }
 
 async function load() {
-  const text = await fetchRetry("data/people.csv");
+  const text = await fetchRetry("data/people.csv", true);
   const cap = Math.ceil(text.length / 38) + 1000;          // generous upper bound on the row count
   streak = new Uint8Array(cap); active = new Uint8Array(cap); ctyIdx = new Uint16Array(cap); cur = new Uint8Array(cap);
   buckets = Array.from({ length: MAXS + 1 }, () => []);
