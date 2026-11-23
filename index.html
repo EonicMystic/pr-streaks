@@ -802,6 +802,45 @@ function recordsEl() {
 
 /* ---------- this week ---------- */
 let weekData = null, weekSub = "gained";
+const GWIN = [["7 days", 7], ["30 days", 30], ["3 months", 90], ["6 months", 180], ["1 year", 365]];
+let gWin = +store("gwin") || 30, gCountry = store("gcountry") || "";
+let gainsRows = null, gainsMap = null;
+async function loadGains() {
+  if (gainsRows) return gainsRows;
+  const r = await fetch("data/gains.csv", { cache: "no-cache" }); if (!r.ok) throw new Error("gains");
+  const L = (await r.text()).split("\n"); L.shift();
+  gainsRows = L.filter(x => x).map(x => { const p = parseLine(x.replace(/\r$/, "")); return { name: p[0], id: p[1], country: p[2], cur: +p[3], g: [+p[4], +p[5], +p[6], +p[7], +p[8]] }; });
+  gainsMap = new Map(gainsRows.map(x => [x.id, x]));
+  return gainsRows;
+}
+function renderGrowth(body) {
+  body.replaceChildren(el("div", "msg", "Loading…"));
+  Promise.all([loadGains(), getStamp()]).then(([rows, stamp]) => {
+    if (!body.isConnected) return;
+    body.replaceChildren();
+    const wi = Math.max(0, GWIN.findIndex(w => w[1] === gWin)), days = GWIN[wi][1];
+    const bar = el("div"); bar.style.cssText = "display:flex;gap:8px;margin-bottom:10px";
+    const ws = el("select"); GWIN.forEach(([l, d]) => { const o = el("option", null, "Last " + l); o.value = d; ws.append(o); }); ws.value = days;
+    ws.addEventListener("change", () => { gWin = +ws.value; store("gwin", gWin); renderGrowth(body); });
+    const cs = el("select"); const o0 = el("option", null, "All countries"); o0.value = ""; cs.append(o0);
+    [...new Set(rows.map(r => r.country))].sort().forEach(c => { const o = el("option", null, c); o.value = c; cs.append(o); }); cs.value = gCountry;
+    cs.addEventListener("change", () => { gCountry = cs.value; store("gcountry", gCountry); shown = PAGE; renderGrowth(body); });
+    bar.append(ws, cs); body.append(bar);
+    const list = rows.filter(r => r.g[wi] > 0 && (!gCountry || r.country === gCountry)).sort((a, b) => b.g[wi] - a.g[wi] || b.cur - a.cur || a.name.localeCompare(b.name));
+    let since = "";
+    if (stamp) { const d = new Date(stamp.slice(0, 10) + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() - days); since = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }); }
+    body.append(el("div", "count", "Running streaks of 3+ that grew in the last " + GWIN[wi][0] + (since ? " (competitions after " + since + ")" : "") + ". " + list.length.toLocaleString("en-US") + " people."));
+    if (!list.length) { body.append(el("div", "msg", "No one to show.")); return; }
+    const box = el("div", "list");
+    for (const p of list.slice(0, shown)) box.append(rowEl("+" + p.g[wi], p.name, p.country + " · now " + p.cur + " in a row", String(p.cur), true, () => openPerson(p.id)));
+    body.append(box);
+    if (list.length > shown) {
+      const m = el("button", "more", "Show more"); m.type = "button";
+      m.addEventListener("click", () => { shown += PAGE; renderGrowth(body); });
+      body.append(m);
+    }
+  }).catch(() => { body.replaceChildren(el("div", "msg", "Couldn't load the growth list.")); });
+}
 async function loadWeek() {
   if (weekData) return weekData;
   const get = async f => { const r = await fetch("data/" + f, { cache: "no-cache" }); if (!r.ok) throw new Error(f); const L = (await r.text()).split("\n"); L.shift(); return L.filter(x => x).map(x => parseLine(x.replace(/\r$/, ""))); };
@@ -811,12 +850,13 @@ async function loadWeek() {
 const fr = x => !x || x === "——" ? "—" : (x.startsWith("T-") ? x : "#" + x);
 function renderWeek(v) {
   const sub = el("div", "sub2");
-  for (const [k, label] of [["gained", "Gained a PR"], ["lost", "Lost a streak"]]) {
+  for (const [k, label] of [["gained", "Gained a PR"], ["lost", "Lost a streak"], ["growth", "Growth"]]) {
     const b = el("button", null, label); b.type = "button"; b.setAttribute("aria-pressed", weekSub === k ? "true" : "false");
     b.addEventListener("click", () => { weekSub = k; shown = PAGE; render(); });
     sub.append(b);
   }
   const body = el("div"); v.append(sub, body);
+  if (weekSub === "growth") { renderGrowth(body); return; }
   body.append(el("div", "msg", "Loading…"));
   loadWeek().then(d => {
     if (!body.isConnected) return;
@@ -1020,6 +1060,12 @@ function renderPerson(v, i) {
     } else rows.push(["Details", "Streak history is kept for streaks of 3 or more."]);
     for (const [l, t] of rows) { const r = el("div", "r"); r.append(el("span", null, l), el("b", null, t)); info.append(r); }
   });
+  if (c >= 3) loadGains().then(() => {
+    if (!info.isConnected) return;
+    const x = gainsMap.get(ids[i]), r = el("div", "r");
+    r.append(el("span", null, "Growth"), el("b", null, x ? GWIN.map(([l, d], k) => "+" + x.g[k] + " in " + l).join(" · ") : "No new competitions added to the streak in the last year"));
+    info.append(r);
+  }).catch(() => {});
   Promise.all([loadNext(), loadUpcoming().catch(() => null)]).then(([m, list]) => {
     if (!info.isConnected) return;
     const link = (c, parent) => { const a2 = el("a", null, c.name); a2.href = "https://www.worldcubeassociation.org/competitions/" + encodeURIComponent(c.id); a2.target = "_blank"; a2.rel = "noopener"; a2.style.color = "var(--accent)"; parent.append(a2); };
