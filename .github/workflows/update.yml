@@ -36,7 +36,6 @@ jobs:
           mkdir -p site/data history
           python3 build_streaks.py "$RUNNER_TEMP/export.zip" site/data history
           cp index.html site/index.html
-          cp streaks-preview.png site/streaks-preview.png || echo "no preview image found, skipping"
 
       - name: Next competitions
         continue-on-error: true
@@ -104,3 +103,47 @@ jobs:
       - id: deployment_retry
         if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v4
+
+      - name: Check that the live site really has the data
+        id: verify
+        continue-on-error: true
+        env:
+          URL: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
+        run: |
+          base="${URL%/}/"
+          want=$(wc -c < site/data/people.csv)
+          for i in $(seq 1 10); do
+            code=$(curl -s -o "$RUNNER_TEMP/live.csv" -w '%{http_code}' "${base}data/people.csv?v=$RANDOM$i" || true)
+            got=$(wc -c < "$RUNNER_TEMP/live.csv")
+            echo "try $i: HTTP $code, $got bytes (expected $want)"
+            if [ "$code" = "200" ] && [ "$got" = "$want" ]; then echo "Live site is good"; exit 0; fi
+            sleep 20
+          done
+          exit 1
+
+      - name: Show what is deployed (only if the check failed)
+        if: steps.verify.outcome == 'failure'
+        run: |
+          base="${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}"
+          base="${base%/}/"
+          curl -sI "${base}" | head -12 || true
+          curl -sI "${base}data/people.csv?v=$RANDOM" | head -12 || true
+          git log --oneline -3 || true
+
+      - name: Deploy again if the check failed
+        id: deployment_fix
+        if: steps.verify.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+
+      - name: Final check (turns the run red if the site is still broken)
+        if: steps.verify.outcome == 'failure'
+        env:
+          URL: ${{ steps.deployment_fix.outputs.page_url }}
+        run: |
+          sleep 30
+          base="${URL%/}/"
+          want=$(wc -c < site/data/people.csv)
+          code=$(curl -s -o "$RUNNER_TEMP/live.csv" -w '%{http_code}' "${base}data/people.csv?v=$RANDOM" || true)
+          got=$(wc -c < "$RUNNER_TEMP/live.csv")
+          echo "HTTP $code, $got bytes (expected $want)"
+          [ "$code" = "200" ] && [ "$got" = "$want" ]
