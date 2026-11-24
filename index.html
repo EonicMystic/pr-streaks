@@ -219,7 +219,7 @@ function el(tag, cls, text) {
 function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) {} return null; }
 
 /* ---------------- data ---------------- */
-let N = 0, names = [], ids = [], cty = [], hay = null;
+let N = 0, names = [], ids = [], cty = [], hay = null, gen = null;   // gen: 0 men, 1 women, 2 other
 let streak, active, cur, countryList = [], cIndex = new Map(), ctyIdx;
 let buckets = [];                       // buckets[s] = person indexes with streak s
 let cntAll = [], cntAct = [], ccAll = [], ccAct = []; // streak -> count (world), per-country arrays
@@ -261,7 +261,7 @@ async function fetchRetry(url, patient) {
 async function load() {
   const text = await fetchRetry("data/people.csv", true);
   const cap = Math.ceil(text.length / 38) + 1000;          // generous upper bound on the row count
-  streak = new Uint8Array(cap); active = new Uint8Array(cap); ctyIdx = new Uint16Array(cap); cur = new Uint8Array(cap);
+  gen = new Uint8Array(cap); streak = new Uint8Array(cap); active = new Uint8Array(cap); ctyIdx = new Uint16Array(cap); cur = new Uint8Array(cap);
   buckets = Array.from({ length: MAXS + 1 }, () => []);
   runBuckets = Array.from({ length: MAXS + 1 }, () => []);
   cntAll = new Int32Array(MAXS + 2); cntAct = new Int32Array(MAXS + 2);
@@ -272,15 +272,15 @@ async function load() {
     let line = text.slice(pos, nl); pos = nl + 1;
     if (line.charCodeAt(line.length - 1) === 13) line = line.slice(0, -1);
     if (!line) continue;
-    let f0, f1, f2, f3, f4, f5;
+    let f0, f1, f2, f3, f4, f5, f6 = "";
     if (line.indexOf('"') < 0) {
-      const c1 = line.indexOf(","), c2 = line.indexOf(",", c1 + 1), c3 = line.indexOf(",", c2 + 1), c4 = line.indexOf(",", c3 + 1), c5 = line.indexOf(",", c4 + 1);
+      const c1 = line.indexOf(","), c2 = line.indexOf(",", c1 + 1), c3 = line.indexOf(",", c2 + 1), c4 = line.indexOf(",", c3 + 1), c5 = line.indexOf(",", c4 + 1), c6 = c5 < 0 ? -1 : line.indexOf(",", c5 + 1);
       if (c4 < 0) continue;
       f0 = line.slice(0, c1); f1 = line.slice(c1 + 1, c2); f2 = line.slice(c2 + 1, c3); f3 = line.slice(c3 + 1, c4);
-      f4 = c5 < 0 ? line.slice(c4 + 1) : line.slice(c4 + 1, c5); f5 = c5 < 0 ? "" : line.slice(c5 + 1);
+      f4 = c5 < 0 ? line.slice(c4 + 1) : line.slice(c4 + 1, c5); f5 = c5 < 0 ? "" : (c6 < 0 ? line.slice(c5 + 1) : line.slice(c5 + 1, c6)); f6 = c6 < 0 ? "" : line.slice(c6 + 1);
     } else {
       const p = parseLine(line); if (p.length < 5) continue;
-      f0 = p[0]; f1 = p[1]; f2 = p[2]; f3 = p[3]; f4 = p[4]; f5 = p[5] || "";
+      f0 = p[0]; f1 = p[1]; f2 = p[2]; f3 = p[3]; f4 = p[4]; f5 = p[5] || ""; f6 = p[6] || "";
     }
     names.push(f0); ids.push(f1); cty.push(f2);
     let ci = cIndex.get(f2);
@@ -288,7 +288,7 @@ async function load() {
     ctyIdx[i] = ci;
     const s = Math.min(+f3 || 0, MAXS), a = f4 === "1" ? 1 : 0;
     const c = f5 === "" ? (a ? s : 0) : Math.min(+f5 || 0, MAXS);     // current run; older data files had no such column
-    streak[i] = s; active[i] = a; cur[i] = c;
+    streak[i] = s; active[i] = a; cur[i] = c; gen[i] = f6 === "m" ? 0 : f6 === "f" ? 1 : 2;
     buckets[s].push(i);
     cntAll[s]++; ccAll[ci][s]++; totalAll++;
     if (c > 0) { cntAct[c]++; ccAct[ci][c]++; totalAct++; runBuckets[c].push(i); }
@@ -327,7 +327,8 @@ function rankIn(counts, s) {
 const fmtRank = r => (r.tied ? "T-" : "#") + r.rank.toLocaleString();
 
 /* ---------------- boards ---------------- */
-function boardRows(kind, country, limit) {
+function boardRows(kind, country, limit, g) {
+  const gi = g === "m" ? 0 : g === "f" ? 1 : g === "o" ? 2 : -1;
   const needActive = kind === "worldAct" || kind === "countryAct" || kind === "continentAct";
   const byCountry = kind === "countryAll" || kind === "countryAct";
   const byCont = kind === "continentAll" || kind === "continentAct";
@@ -336,9 +337,9 @@ function boardRows(kind, country, limit) {
   const rows = []; let before = 0, more = false;
   for (let s = MAXS; s >= 1 && !more; s--) {
     const b = (needActive ? runBuckets : buckets)[s]; if (!b.length) continue;
-    let m = b;
-    if (byCountry) m = b.filter(i => ctyIdx[i] === ci);
-    else if (byCont) m = b.filter(i => contOf(i) === ki);
+    let m = gi >= 0 ? b.filter(i => gen[i] === gi) : b;
+    if (byCountry) m = m.filter(i => ctyIdx[i] === ci);
+    else if (byCont) m = m.filter(i => contOf(i) === ki);
     if (!m.length) continue;
     m = m.slice().sort((x, y) => names[x].localeCompare(names[y]));
     const tied = m.length > 1;
@@ -352,6 +353,7 @@ function boardRows(kind, country, limit) {
 }
 
 /* ---------------- views ---------------- */
+let boardGender = ["a", "m", "f", "o"].includes(store("pgender")) ? store("pgender") : "a";
 let tab = "lookup", shown = PAGE, query = "", country = store("country") || "", continent = store("continent") || "";
 
 let idMap = null;
@@ -696,7 +698,7 @@ function renderAbout(v) {
   add("What is a PR streak?", "The number of competitions in a row that a person attended where they set a personal record (PR) in at least one event. Competitions are taken in date order, and one competition without a PR ends the run.");
   add("What counts as a PR?", "A new best single or average in any event, compared with everything that person did before that competition. Matching your previous best counts too.");
   add("What do Longest, Current and Active mean?", "<b>Longest</b> is a person's best-ever streak. <b>Current</b> is the PR run they're on right now, counted back from their latest competition, and it can be shorter than their longest. <b>Active</b> means they have a current streak: their most recent competition had a PR. A person's page shows both numbers when they differ.");
-  add("How are ranks worked out?", "All-time rankings use each person\'s longest streak and Active rankings use their current streak. People with the same number share the best rank and show it as T- (for example T-196). Continent and country ranks only compare people from the same continent or country. Active ranks only compare people whose streak is still running. \"Longer than\" is the share of all competitors whose longest streak is shorter.");
+  add("How are ranks worked out?", "All-time rankings use each person\'s longest streak and Active rankings use their current streak. People with the same number share the best rank and show it as T- (for example T-196). Continent and country ranks only compare people from the same continent or country. The Men, Women and Other buttons on the ranking tabs rank people only against others in that group. Active ranks only compare people whose streak is still running. \"Longer than\" is the share of all competitors whose longest streak is shorter.");
   add("Why can't I find someone?", "People with no PR competitions, or who haven't competed yet, aren't listed. New results also take time to appear: the site rebuilds every night from the official WCA results export, which can lag a competition by a day or more.");
   add("What is the Projections tab?", "It shows where a streak would rank, and what streak a rank takes, using today\'s numbers. Pick a person to start from their own streak. Other people keep competing, so real ranks will shift.");
   add("What is the This week tab?", "Current streaks of 30 or more that grew or ended since the comparison date shown on that tab. It fills in once the site has a week of history.");
@@ -917,7 +919,15 @@ function renderWeek(v) {
   }).catch(() => { body.replaceChildren(el("div", "msg", "Couldn't load this week's changes.")); });
 }
 
+const GNAME = { a: "everyone", m: "men", f: "women", o: "people listed as other" };
 function renderBoard(v) {
+  const gs = el("div", "sub2");
+  for (const [k, l] of [["a", "All"], ["m", "Men"], ["f", "Women"], ["o", "Other"]]) {
+    const b = el("button", null, l); b.type = "button"; b.setAttribute("aria-pressed", boardGender === k ? "true" : "false");
+    b.addEventListener("click", () => { boardGender = k; store("pgender", k); shown = PAGE; render(); });
+    gs.append(b);
+  }
+  v.append(gs);
   const byCountry = tab === "countryAll" || tab === "countryAct";
   const byCont = tab === "continentAll" || tab === "continentAct";
   if (byCont) {
@@ -937,12 +947,13 @@ function renderBoard(v) {
     v.append(sel);
     if (!country) { v.append(el("div", "msg", "Pick a country to see its ranking.")); return; }
   }
-  const { rows, more } = boardRows(tab, byCont ? continent : country, shown);
+  const { rows, more } = boardRows(tab, byCont ? continent : country, shown, boardGender);
   if (!rows.length) { v.append(el("div", "msg", "No one to show.")); return; }
   const box = el("div", "list");
   const isAct = tab === "worldAct" || tab === "countryAct" || tab === "continentAct";
   for (const r of rows) box.append(item(r.rank, r.i, null, isAct ? r.val : undefined));
   v.append(box);
+  if (boardGender !== "a") v.append(el("div", "count", "Ranks here are among " + GNAME[boardGender] + " only. Other includes anyone whose WCA profile doesn't say male or female."));
   if (more) {
     const b = el("button", "more", "Show more"); b.type = "button";
     b.addEventListener("click", () => { shown += PAGE; render(); });
