@@ -353,7 +353,7 @@ function boardRows(kind, country, limit, g) {
 }
 
 /* ---------------- views ---------------- */
-let boardGender = ["a", "m", "f", "o"].includes(store("pgender")) ? store("pgender") : "a";
+let boardGender = ["a", "m", "f"].includes(store("pgender")) ? store("pgender") : "a";
 let tab = "lookup", shown = PAGE, query = "", country = store("country") || "", continent = store("continent") || "";
 
 let idMap = null;
@@ -698,7 +698,7 @@ function renderAbout(v) {
   add("What is a PR streak?", "The number of competitions in a row that a person attended where they set a personal record (PR) in at least one event. Competitions are taken in date order, and one competition without a PR ends the run.");
   add("What counts as a PR?", "A new best single or average in any event, compared with everything that person did before that competition. Matching your previous best counts too.");
   add("What do Longest, Current and Active mean?", "<b>Longest</b> is a person's best-ever streak. <b>Current</b> is the PR run they're on right now, counted back from their latest competition, and it can be shorter than their longest. <b>Active</b> means they have a current streak: their most recent competition had a PR. A person's page shows both numbers when they differ.");
-  add("How are ranks worked out?", "All-time rankings use each person\'s longest streak and Active rankings use their current streak. People with the same number share the best rank and show it as T- (for example T-196). Continent and country ranks only compare people from the same continent or country. The Men, Women and Other buttons on the ranking tabs rank people only against others in that group. Active ranks only compare people whose streak is still running. \"Longer than\" is the share of all competitors whose longest streak is shorter.");
+  add("How are ranks worked out?", "All-time rankings use each person\'s longest streak and Active rankings use their current streak. People with the same number share the best rank and show it as T- (for example T-196). Continent and country ranks only compare people from the same continent or country. The Men and Women buttons on the ranking tabs rank people only against others in that group. Active ranks only compare people whose streak is still running. \"Longer than\" is the share of all competitors whose longest streak is shorter.");
   add("Why can't I find someone?", "People with no PR competitions, or who haven't competed yet, aren't listed. New results also take time to appear: the site rebuilds every night from the official WCA results export, which can lag a competition by a day or more.");
   add("What is the Projections tab?", "It shows where a streak would rank, and what streak a rank takes, using today\'s numbers. Pick a person to start from their own streak. Other people keep competing, so real ranks will shift.");
   add("What is the This week tab?", "Current streaks of 30 or more that grew or ended since the comparison date shown on that tab. It fills in once the site has a week of history.");
@@ -919,10 +919,10 @@ function renderWeek(v) {
   }).catch(() => { body.replaceChildren(el("div", "msg", "Couldn't load this week's changes.")); });
 }
 
-const GNAME = { a: "everyone", m: "men", f: "women", o: "people listed as other" };
+const GNAME = { a: "everyone", m: "men", f: "women" };
 function renderBoard(v) {
   const gs = el("div", "sub2");
-  for (const [k, l] of [["a", "All"], ["m", "Men"], ["f", "Women"], ["o", "Other"]]) {
+  for (const [k, l] of [["a", "All"], ["m", "Men"], ["f", "Women"]]) {
     const b = el("button", null, l); b.type = "button"; b.setAttribute("aria-pressed", boardGender === k ? "true" : "false");
     b.addEventListener("click", () => { boardGender = k; store("pgender", k); shown = PAGE; render(); });
     gs.append(b);
@@ -953,7 +953,7 @@ function renderBoard(v) {
   const isAct = tab === "worldAct" || tab === "countryAct" || tab === "continentAct";
   for (const r of rows) box.append(item(r.rank, r.i, null, isAct ? r.val : undefined));
   v.append(box);
-  if (boardGender !== "a") v.append(el("div", "count", "Ranks here are among " + GNAME[boardGender] + " only. Other includes anyone whose WCA profile doesn't say male or female."));
+  if (boardGender !== "a") v.append(el("div", "count", "Ranks here are among " + GNAME[boardGender] + " only. People whose WCA profile doesn't say male or female appear under All only."));
   if (more) {
     const b = el("button", "more", "Show more"); b.type = "button";
     b.addEventListener("click", () => { shown += PAGE; render(); });
