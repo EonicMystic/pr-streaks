@@ -196,6 +196,7 @@ const PAGE = 40;
 const TABS = [
   { id: "lookup",    label: "Lookup" },
   { id: "week",      label: "This week" },
+  { id: "growth",    label: "Growth" },
   { id: "upcoming",  label: "Competitions" },
   { id: "mine",      label: "My list" },
   { id: "proj",      label: "Projections" },
@@ -882,13 +883,12 @@ async function loadWeek() {
 const fr = x => !x || x === "——" ? "—" : (x.startsWith("T-") ? x : "#" + x);
 function renderWeek(v) {
   const sub = el("div", "sub2");
-  for (const [k, label] of [["gained", "Gained a PR"], ["lost", "Lost a streak"], ["growth", "Growth"]]) {
+  for (const [k, label] of [["gained", "Gained a PR"], ["lost", "Lost a streak"]]) {
     const b = el("button", null, label); b.type = "button"; b.setAttribute("aria-pressed", weekSub === k ? "true" : "false");
     b.addEventListener("click", () => { weekSub = k; shown = PAGE; render(); });
     sub.append(b);
   }
   const body = el("div"); v.append(sub, body);
-  if (weekSub === "growth") { renderGrowth(body); return; }
   body.append(el("div", "msg", "Loading…"));
   loadWeek().then(d => {
     if (!body.isConnected) return;
@@ -1253,7 +1253,7 @@ function render() {
     window.scrollTo(0, 0); return;
   }
   $("tabs").style.display = ""; renderTabs();
-  if (tab === "lookup") renderLookup(v); else if (tab === "week") renderWeek(v); else if (tab === "mine") renderMine(v); else if (tab === "upcoming") renderUpcoming(v); else if (tab === "proj") renderProj(v); else renderBoard(v);
+  if (tab === "lookup") renderLookup(v); else if (tab === "week") renderWeek(v); else if (tab === "growth") { const gb = el("div"); v.append(gb); renderGrowth(gb); } else if (tab === "mine") renderMine(v); else if (tab === "upcoming") renderUpcoming(v); else if (tab === "proj") renderProj(v); else renderBoard(v);
 }
 
 window.addEventListener("hashchange", render);
