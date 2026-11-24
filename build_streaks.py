@@ -86,7 +86,8 @@ people = {}
 for idx, p in rows('persons'):
     w = p[idx['wca_id']]
     if p[idx['sub_id']] == '1' or w not in people:
-        people[w] = (p[idx['name']], p[idx['country_id']])
+        g_ = p[idx['gender']] if 'gender' in idx else ''
+        people[w] = (p[idx['name']], p[idx['country_id']], g_ if g_ in ('m', 'f') else 'o')
 
 results = []
 for pid, comps in att.items():
@@ -101,11 +102,11 @@ for pid, comps in att.items():
         else:
             cur = 0
     if best:
-        name, country = people.get(pid, (pid, ''))
+        name, country, gender = people.get(pid, (pid, '', 'o'))
         still = (bi == len(ordered) - 1)            # the longest streak is still running
         recent = sum(1 for c in ordered if comp_date[c] > CUTOFF)
         broke = comp_name[ordered[bi + 1]] if not still else ''
-        results.append(dict(wca_id=pid, name=name, country=country, streak=best,
+        results.append(dict(wca_id=pid, name=name, country=country, gender=gender, streak=best,
                             start=comp_name[bs], end=comp_name[be], active=cur > 0, still=still,
                             run=cur, run_start=comp_name[cs] if cur > 0 else '',
                             total_comps=len(ordered), last_comp=comp_name[ordered[-1]], recent=recent,
@@ -321,9 +322,9 @@ with open(os.path.join(out_dir, 'country_summary.csv'), 'w', newline='', encodin
 # ---------- every competitor with at least one PR comp, for the website ----------
 with open(os.path.join(out_dir, 'people.csv'), 'w', newline='', encoding='utf-8') as f:
     w = csv.writer(f)
-    w.writerow(['Name', 'WCA ID', 'Country', 'Streak', 'Active', 'Current'])
+    w.writerow(['Name', 'WCA ID', 'Country', 'Streak', 'Active', 'Current', 'Gender'])
     for r in results:
-        w.writerow([r['name'], r['wca_id'], r['country'], r['streak'], 1 if r['still'] else 0, r['run']])
+        w.writerow([r['name'], r['wca_id'], r['country'], r['streak'], 1 if r['still'] else 0, r['run'], r['gender']])
 
 # ---------- how much running streaks have grown over the last 7 / 30 / 90 / 180 / 365 days ----------
 with open(os.path.join(out_dir, 'gains.csv'), 'w', newline='', encoding='utf-8') as f:
